@@ -1,4 +1,6 @@
-# polyrepo-cli
+# **Polyrepo CLI**
+
+![Rest Pipeline JS](https://github.com/macrulezru/assets/blob/master/packages-images/polyrepo-cli.png?raw=true)
 
 An interactive CLI for managing a folder of local npm package repos:
 version bumps through a pull request, npm publishing, GitHub releases,
