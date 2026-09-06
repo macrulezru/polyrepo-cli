@@ -189,6 +189,11 @@ program
   .description('Show version, branch, tag, release, npm, and dependency status for every package.')
   .option('--quick', 'Skip the tag/release/npm/dependency checks — just version, branch, and git status.')
   .option('--path', "Add a Path column showing each package's location on disk.")
+  .option('--output <path>', 'Also save the table to this file, for sending the data somewhere.')
+  .option(
+    '--format <type>',
+    'File format for --output: md, json, csv, html, or txt. Guessed from the file extension if omitted.',
+  )
   .addHelpText(
     'after',
     `
@@ -204,11 +209,19 @@ all you need. --path adds a Path column right after Package, for when a
 package's directory name alone doesn't tell you where it actually lives
 (e.g. it was found via a --packages entry, not a root).
 
+--output saves the exact same table (same columns as printed — respects
+--quick/--path) to a file, in addition to printing it. --format picks the
+file format (md/json/csv/html/txt); without it, the format is guessed from
+--output's extension (.json → json, .md/.markdown → markdown, .csv → csv,
+.html/.htm → html, anything else → plain text).
+
 Examples:
   $ polyrepo list
   $ polyrepo ls
   $ polyrepo list --quick                       Just version/branch/git, no network calls
   $ polyrepo list --path                        Also show each package's directory
+  $ polyrepo list --output packages.json        Also save as JSON (format guessed from extension)
+  $ polyrepo list --output report.txt --format md  Save as Markdown despite the .txt name
 `,
   )
   .action((opts) =>
@@ -216,6 +229,8 @@ Examples:
       configPath: program.opts().config,
       quick: Boolean(opts.quick),
       showPath: Boolean(opts.path),
+      format: opts.format,
+      output: opts.output,
     }),
   )
 

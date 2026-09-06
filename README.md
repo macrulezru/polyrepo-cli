@@ -14,7 +14,8 @@ with `--dry-run` before anything actually changes.
 - **`list`** — one table per package: version, branch, git status, git
   tag, GitHub Release, npm registry status, and cross-package
   dependency drift. `list --quick` skips the network checks for an
-  instant version/branch/git-only view.
+  instant version/branch/git-only view; `list --output <path>` also
+  saves the same table as Markdown, JSON, CSV, HTML, or plain text.
 - **`outdated`** — one table across every package of what's outdated
   (`npm outdated`), instead of running it in each repo by hand.
 - **`prs`** — one table of every open pull request across every
@@ -190,6 +191,29 @@ each one actually lives on disk — handy once packages come from a mix
 of `roots` and one-off `packages` entries and the directory name alone
 doesn't say where to find it.
 
+`--output <path>` additionally saves the exact same table (same
+columns as printed — respects `--quick`/`--path`) to a file, for
+sending the data somewhere. `--format` picks the file format —
+`md` (Markdown table), `json` (array of objects), `csv` (RFC
+4180-quoted), `html` (a standalone page, openable directly in a
+browser), or `txt` (plain aligned columns, no ANSI colors); without
+it, the format is guessed from `--output`'s extension (`.json` →
+json, `.md`/`.markdown` → markdown, `.csv` → csv, `.html`/`.htm` →
+html, anything else → plain text). In JSON, a cell that's just the
+terminal's ✓/✗ checkmark (e.g. Release, or npm when it's up to date)
+becomes a real `true`/`false` — anything carrying more information
+than a plain yes/no (an outdated registry version, `⚠ N` stale deps,
+`clean`/`dirty`) stays text.
+
+**Options:**
+
+| Flag | What it does |
+| --- | --- |
+| `--quick` | Skip the tag/release/npm/dependency checks — just version, branch, git status. |
+| `--path` | Add a Path column showing each package's location on disk. |
+| `--output <path>` | Also save the table to this file. |
+| `--format <md\|json\|csv\|html\|txt>` | File format for `--output`. Guessed from the file extension if omitted. |
+
 ```bash
 polyrepo list
 
@@ -198,6 +222,12 @@ polyrepo list --quick
 
 # also show each package's directory
 polyrepo list --path
+
+# also save as JSON (format guessed from the .json extension)
+polyrepo list --output packages.json
+
+# save as Markdown regardless of the file's own extension
+polyrepo list --output report.txt --format md
 ```
 
 ### `polyrepo outdated`
