@@ -6,7 +6,7 @@ import path from 'node:path'
 import { findStaleLocalDeps } from '../src/crossDeps.js'
 
 function makeRepo(name, version, dependencies) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vpc-crossdeps-test-'))
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'polyrepo-crossdeps-test-'))
   const pkgPath = path.join(dir, 'package.json')
   fs.writeFileSync(pkgPath, JSON.stringify({ name, version, dependencies }, null, 2))
   return { path: dir, pkgPath, name, version }

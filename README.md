@@ -53,7 +53,7 @@ follow.
 - `npm` on `PATH`, authenticated (`npm whoami`) — needed only for
   `publish`
 
-Run `vpc doctor` to check all of this in one go.
+Run `polyrepo doctor` to check all of this in one go.
 
 ## Installation
 
@@ -63,7 +63,7 @@ cd polyrepo-cli
 npm install
 ```
 
-Optionally, make `vpc` available everywhere:
+Optionally, make `polyrepo` available everywhere:
 
 ```bash
 npm link
@@ -74,9 +74,9 @@ Without `npm link`, run commands as `node src/index.js <command>`.
 ## Quick start
 
 ```bash
-vpc setup      # tell it where your package repos live
-vpc doctor     # confirm the environment is set up correctly
-vpc list       # see version/branch/tag/release/npm status for everything
+polyrepo setup      # tell it where your package repos live
+polyrepo doctor     # confirm the environment is set up correctly
+polyrepo list       # see version/branch/tag/release/npm status for everything
 ```
 
 ## Help
@@ -84,19 +84,19 @@ vpc list       # see version/branch/tag/release/npm status for everything
 Every command has built-in `--help`:
 
 ```bash
-vpc --help
-vpc bump --help
+polyrepo --help
+polyrepo bump --help
 ```
 
-`vpc --help` lists every command together with its flags, so you
+`polyrepo --help` lists every command together with its flags, so you
 rarely need to open a command's own `--help` just to remember an
 option name.
 
 ## Commands
 
-### `vpc setup`
+### `polyrepo setup`
 
-An interactive menu for `vpc.config.json` itself — no need to open the
+An interactive menu for `polyrepo.config.json` itself — no need to open the
 JSON by hand. Shows the current `roots` and `packages` lists with
 `✓ exists` / `✗ not found` (and, for `packages`, `! no
 package.json/.git here` when the folder exists but isn't a package),
@@ -112,13 +112,13 @@ only written to disk when you choose "Save and exit"; "Discard changes
 and exit" throws away anything done in that session.
 
 ```bash
-vpc setup
+polyrepo setup
 
 # edit a non-default config
-vpc setup --config "/path/to/vpc.config.json"
+polyrepo setup --config "/path/to/polyrepo.config.json"
 ```
 
-### `vpc list` (alias `ls`)
+### `polyrepo list` (alias `ls`)
 
 A table of every discovered package. Full summary by default:
 
@@ -133,18 +133,18 @@ A table of every discovered package. Full summary by default:
 
 Read-only. The git/tag/release/npm checks run in parallel across
 packages, but they're still real network calls (tag, release, and
-registry — three per package), so a full `vpc list` across many
+registry — three per package), so a full `polyrepo list` across many
 packages takes a few seconds rather than being instant. Use `--quick`
 for just version/branch/git status when that's all you need.
 
 ```bash
-vpc list
+polyrepo list
 
 # version/branch/git only — no network calls
-vpc list --quick
+polyrepo list --quick
 ```
 
-### `vpc doctor`
+### `polyrepo doctor`
 
 A read-only health check in three sections:
 
@@ -161,10 +161,10 @@ A read-only health check in three sections:
 Worth running first if any other command is behaving unexpectedly.
 
 ```bash
-vpc doctor
+polyrepo doctor
 ```
 
-### `vpc switch-master` (alias `sm`)
+### `polyrepo switch-master` (alias `sm`)
 
 1. Shows a checkbox list of every repo with its current branch; repos
    not currently on `master` are pre-selected.
@@ -178,13 +178,13 @@ vpc doctor
    hand — no `--force`/`reset --hard` is ever used.
 
 ```bash
-vpc switch-master
+polyrepo switch-master
 
 # no checkbox, specific repos, no confirmation — for scripts
-vpc switch-master --packages vue-toast-kit,os-detect --yes
+polyrepo switch-master --packages vue-toast-kit,os-detect --yes
 ```
 
-### `vpc bump [options]`
+### `polyrepo bump [options]`
 
 1. Shows a checkbox of packages with their current version and the
    version they'd bump to (`1.2.9 → 1.2.10`, always a patch). Packages
@@ -248,7 +248,7 @@ vpc switch-master --packages vue-toast-kit,os-detect --yes
    dependency separately.
 
 Publishing to npm and creating a GitHub Release are deliberately
-separate steps — see `vpc publish` and `vpc release` below. Bumping a
+separate steps — see `polyrepo publish` and `polyrepo release` below. Bumping a
 batch of packages and then publishing or releasing only some of them
 are different decisions that don't always happen at the same time.
 
@@ -264,19 +264,19 @@ are different decisions that don't always happen at the same time.
 ```bash
 # dry run first — nothing is pushed, committed, merged, or tagged,
 # it just shows what would happen
-vpc bump --dry-run
+polyrepo bump --dry-run
 
 # normal interactive run
-vpc bump
+polyrepo bump
 
 # wait for CI before merging
-vpc bump --wait-checks
+polyrepo bump --wait-checks
 
 # fully non-interactive, for a script/CI
-vpc bump --packages vue-toast-kit,os-detect --yes
+polyrepo bump --packages vue-toast-kit,os-detect --yes
 ```
 
-### `vpc publish [options]`
+### `polyrepo publish [options]`
 
 1. Checks each package's registry version (`npm view <pkg> version`)
    against its local `package.json` version — in parallel, printing
@@ -302,21 +302,21 @@ vpc bump --packages vue-toast-kit,os-detect --yes
 
 ```bash
 # see what's unpublished, then publish what you pick
-vpc publish
+polyrepo publish
 
 # same, but nothing is actually published — just build and pack
-vpc publish --dry-run
+polyrepo publish --dry-run
 
 # specific packages, no prompts
-vpc publish --packages vue-toast-kit,os-detect --yes
+polyrepo publish --packages vue-toast-kit,os-detect --yes
 ```
 
-### `vpc tag [options]`
+### `polyrepo tag [options]`
 
 For a package whose version was already bumped some other way (not
-through `vpc bump`, or before it started tagging), `vpc release` has
+through `polyrepo bump`, or before it started tagging), `polyrepo release` has
 nothing to work with — there's no tag for the current version yet.
-`vpc tag` puts the missing tag on the current version without bumping
+`polyrepo tag` puts the missing tag on the current version without bumping
 it again or opening a PR:
 
 1. Checks each package (in parallel) for whether a tag
@@ -331,7 +331,7 @@ it again or opening a PR:
 4. If at least one package was actually tagged (and it wasn't a
    `--dry-run`), it asks: "Create a GitHub Release for the N
    package(s) just tagged?" — answering yes runs the same process as
-   `vpc release` for exactly those packages (notes from `CHANGELOG.md`
+   `polyrepo release` for exactly those packages (notes from `CHANGELOG.md`
    when available, otherwise `--generate-notes`).
 
 **Options:**
@@ -345,20 +345,20 @@ it again or opening a PR:
 
 ```bash
 # see what needs tagging, tag it, get offered a release
-vpc tag
+polyrepo tag
 
 # fully non-interactive: tag and release
-vpc tag --packages vue-toast-kit,os-detect --yes --release
+polyrepo tag --packages vue-toast-kit,os-detect --yes --release
 ```
 
-### `vpc release [options]`
+### `polyrepo release [options]`
 
 1. Checks each package (in parallel) for a `v<local version>` tag on
    origin (the one `bump` or `tag` creates) and whether that tag
    already has a GitHub Release — printing progress per package.
 2. Shows a checkbox: package and its tag. Packages with no tag for
    their current version are shown disabled ("no tag yet — run
-   `vpc bump` first") — they can't be selected until tagged. Already
+   `polyrepo bump` first") — they can't be selected until tagged. Already
    released ones are shown as "(already released)" — selectable but
    not required.
 3. After confirming, for each selected package, one at a time:
@@ -378,10 +378,10 @@ vpc tag --packages vue-toast-kit,os-detect --yes --release
 
 ```bash
 # see what's tagged but not released, then release it
-vpc release
+polyrepo release
 
 # specific packages, no prompts
-vpc release --packages vue-toast-kit,os-detect --yes
+polyrepo release --packages vue-toast-kit,os-detect --yes
 ```
 
 ## Example output
@@ -409,7 +409,7 @@ vpc release --packages vue-toast-kit,os-detect --yes
   ✓ Tagged and pushed v1.0.8.
 ```
 
-Re-running `vpc bump` on the same package (say, a previous run was
+Re-running `polyrepo bump` on the same package (say, a previous run was
 interrupted at the CI or network step) is shorter — anything already
 done is just confirmed, not redone:
 
@@ -421,7 +421,7 @@ done is just confirmed, not redone:
   ✓ Tag v1.0.8 already exists on origin.
 ```
 
-`vpc publish` on its own:
+`polyrepo publish` on its own:
 
 ```
 Checking 2 package(s) against the registry...
@@ -436,7 +436,7 @@ Checking 2 package(s) against the registry...
   ✓ Published vue-toast-kit@1.0.8.
 ```
 
-`vpc release` on its own:
+`polyrepo release` on its own:
 
 ```
 Checking 2 package(s) for a tag and an existing release...
@@ -454,8 +454,8 @@ Checking 2 package(s) for a tag and an existing release...
 
 ## Configuration
 
-The list of directories to scan lives in `vpc.config.json` (next to
-this project's own `package.json`) — edit it through `vpc setup`
+The list of directories to scan lives in `polyrepo.config.json` (next to
+this project's own `package.json`) — edit it through `polyrepo setup`
 (recommended) or by hand. Two independent arrays:
 
 - `roots` — directories whose **subfolders** are scanned: each
@@ -470,7 +470,7 @@ and any number of `packages`. A package found through both `roots` and
 `packages` (e.g. a path that happens to overlap) is only counted once.
 Relative paths in the config are resolved against the config file's
 own location, not the current working directory. With no config file
-at all, the CLI finds nothing and tells you to run `vpc setup` — there
+at all, the CLI finds nothing and tells you to run `polyrepo setup` — there
 is no built-in default path.
 
 ```json
@@ -480,28 +480,28 @@ is no built-in default path.
 }
 ```
 
-A ready-to-copy template is at `vpc.config.example.json` in the
-project root — copy it to `vpc.config.json` and edit by hand, or fill
-it in through `vpc setup`.
+A ready-to-copy template is at `polyrepo.config.example.json` in the
+project root — copy it to `polyrepo.config.json` and edit by hand, or fill
+it in through `polyrepo setup`.
 
 If a directory in `roots`/`packages` doesn't exist, or (for
 `packages`) doesn't contain `package.json`/`.git`, the CLI prints a
 warning and skips it without stopping the rest of the run.
 
 A different config file can be pointed to with `--config` (works
-before or after the subcommand) or the `VPC_CONFIG` environment
+before or after the subcommand) or the `POLYREPO_CONFIG` environment
 variable:
 
 ```bash
-vpc --config "/path/to/vpc.config.json" list
-vpc list --config "/path/to/vpc.config.json"
+polyrepo --config "/path/to/polyrepo.config.json" list
+polyrepo list --config "/path/to/polyrepo.config.json"
 ```
 
-For a one-off override without editing the file, `VPC_ROOT` replaces
+For a one-off override without editing the file, `POLYREPO_ROOT` replaces
 the configured `roots` entirely (`packages` is left as-is):
 
 ```bash
-VPC_ROOT="/other/path" vpc list
+POLYREPO_ROOT="/other/path" polyrepo list
 ```
 
 ## Development

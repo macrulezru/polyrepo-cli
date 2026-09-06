@@ -24,7 +24,7 @@ export async function selectPackages({ items, packages, message, buildChoice, pa
 
   // @inquirer/checkbox throws (not rejects — a synchronous throw, so the
   // top-level ExitPromptError handler in index.js never sees it) if every
-  // choice is disabled — e.g. `vpc release` before anything has been
+  // choice is disabled — e.g. `polyrepo release` before anything has been
   // tagged yet. Callers that use `disabled` should really check for this
   // themselves with a message specific to why (see release.js), but this
   // is the backstop so a command that doesn't ends in a clean message

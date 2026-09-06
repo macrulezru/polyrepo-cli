@@ -6,7 +6,7 @@ import path from 'node:path'
 import { hasChangelog, addChangelogEntry, extractChangelogSection } from '../src/changelog.js'
 
 function makeRepo(changelogContent) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vpc-changelog-test-'))
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'polyrepo-changelog-test-'))
   if (changelogContent !== undefined) {
     fs.writeFileSync(path.join(dir, 'CHANGELOG.md'), changelogContent)
   }

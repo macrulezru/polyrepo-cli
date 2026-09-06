@@ -79,14 +79,14 @@ function wrapText(text, width) {
 }
 
 program
-  .name('vpc')
+  .name('polyrepo')
   .description(
     'Manage local npm package repos: pick which directories to scan (setup), see their state (list) or run a health check (doctor), keep them on an up-to-date master (switch-master), release a patch version through a PR (bump), publish to npm (publish), tag an already-current version (tag), and create GitHub Releases (release).',
   )
   .version('1.0.0')
   .option(
     '--config <path>',
-    'Path to a vpc.config.json listing roots/packages to scan (default: vpc.config.json next to this CLI).',
+    'Path to a polyrepo.config.json listing roots/packages to scan (default: polyrepo.config.json next to this CLI).',
   )
   // Hide commander's own one-line-per-command list (see formatCommandsHelp
   // above for why) — the "after" text below replaces it with the two-level
@@ -98,30 +98,30 @@ program
 ${formatCommandsHelp(program.commands)}
 
 Getting started:
-  First run \`vpc setup\` to tell it where your package repos live — a folder
+  First run \`polyrepo setup\` to tell it where your package repos live — a folder
   of repos (a "root", subfolders are scanned) and/or individual repo folders
-  ("packages"). \`vpc doctor\` checks the rest of your setup (git/gh/npm,
+  ("packages"). \`polyrepo doctor\` checks the rest of your setup (git/gh/npm,
   auth, cross-package dependency drift). Everything else reads the same
   package list.
 
 Examples:
-  $ vpc setup                              Add/edit/remove package source directories
-  $ vpc doctor                             Check environment, auth, and dependency drift
-  $ vpc list                               Show version + branch for every package
-  $ vpc switch-master                      Update selected repos to the latest master
-  $ vpc bump --dry-run                     Preview a version bump, nothing is pushed
-  $ vpc bump --packages a,b --yes          Bump specific packages non-interactively
-  $ vpc publish                            Publish packages that are ahead of the registry
-  $ vpc tag                                Tag an already-current version (no bump needed)
-  $ vpc release                            Create GitHub Releases for tagged packages
+  $ polyrepo setup                              Add/edit/remove package source directories
+  $ polyrepo doctor                             Check environment, auth, and dependency drift
+  $ polyrepo list                               Show version + branch for every package
+  $ polyrepo switch-master                      Update selected repos to the latest master
+  $ polyrepo bump --dry-run                     Preview a version bump, nothing is pushed
+  $ polyrepo bump --packages a,b --yes          Bump specific packages non-interactively
+  $ polyrepo publish                            Publish packages that are ahead of the registry
+  $ polyrepo tag                                Tag an already-current version (no bump needed)
+  $ polyrepo release                            Create GitHub Releases for tagged packages
 
-Run \`vpc <command> --help\` for that command's own options and examples.
+Run \`polyrepo <command> --help\` for that command's own options and examples.
 `,
   )
 
 program
   .command('setup')
-  .description('View, add, edit, or remove the roots/packages entries in vpc.config.json.')
+  .description('View, add, edit, or remove the roots/packages entries in polyrepo.config.json.')
   .addHelpText(
     'after',
     `
@@ -131,8 +131,8 @@ under any root. Both are edited through the same menu; nothing is written to
 disk until you choose "Save and exit".
 
 Examples:
-  $ vpc setup
-  $ vpc setup --config "D:\\other\\vpc.config.json"   Edit a different config file
+  $ polyrepo setup
+  $ polyrepo setup --config "D:\\other\\polyrepo.config.json"   Edit a different config file
 `,
   )
   .action(() => setupCommand({ configPath: program.opts().config }))
@@ -150,15 +150,15 @@ version, branch, git status (clean/dirty), whether the current version is
 tagged, whether that tag has a GitHub Release, whether the npm registry
 matches (or the registry version if it doesn't, or "unpublished"), and how
 many other local packages reference it with a now-stale dependency range
-(see \`vpc doctor\`). Everything (git, tag, release, npm) runs in parallel
+(see \`polyrepo doctor\`). Everything (git, tag, release, npm) runs in parallel
 across packages, not one at a time — still not instant with the extra
 network checks, so use --quick for just version/branch/git when that's
 all you need.
 
 Examples:
-  $ vpc list
-  $ vpc ls
-  $ vpc list --quick                       Just version/branch/git, no network calls
+  $ polyrepo list
+  $ polyrepo ls
+  $ polyrepo list --quick                       Just version/branch/git, no network calls
 `,
   )
   .action((opts) => listCommand({ configPath: program.opts().config, quick: Boolean(opts.quick) }))
@@ -170,7 +170,7 @@ program
     'after',
     `
 Read-only. Three sections: Environment (is Node.js new enough, are git/gh/npm
-on PATH and authenticated), Config (does vpc.config.json resolve to any
+on PATH and authenticated), Config (does polyrepo.config.json resolve to any
 packages, which repos are dirty or off master), and Cross-package
 dependencies (does any local package's dependencies/devDependencies/
 peerDependencies range no longer match another local package's current
@@ -178,7 +178,7 @@ version — e.g. after a \`bump\` that package's own package.json wasn't
 updated for). Run this first if any other command is behaving strangely.
 
 Examples:
-  $ vpc doctor
+  $ polyrepo doctor
 `,
   )
   .action(() => doctorCommand({ configPath: program.opts().config }))
@@ -198,8 +198,8 @@ If local master has diverged from origin (fast-forward impossible), that
 repo is reported and left alone for you to resolve by hand.
 
 Examples:
-  $ vpc switch-master
-  $ vpc sm --packages vue-toast-kit,os-detect --yes
+  $ polyrepo switch-master
+  $ polyrepo sm --packages vue-toast-kit,os-detect --yes
 `,
   )
   .action((opts) =>
@@ -221,8 +221,8 @@ program
     'after',
     `
 Branch, PR, merge, and tag — no npm publish here, that's its own command
-(see \`vpc publish\`; for a GitHub Release from the resulting tag, see
-\`vpc release\`). Safe to re-run: if a previous attempt already pushed a
+(see \`polyrepo publish\`; for a GitHub Release from the resulting tag, see
+\`polyrepo release\`). Safe to re-run: if a previous attempt already pushed a
 branch, opened a PR, or even merged it, this picks up from there instead of
 failing or duplicating work. If the package has a CHANGELOG.md, a draft
 entry (Keep a Changelog style, seeded from the commit log since the last
@@ -233,10 +233,10 @@ match a bumped package's new version is reported (nothing is changed
 automatically).
 
 Examples:
-  $ vpc bump --dry-run                     See the plan, nothing changes
-  $ vpc bump                               Interactive: checkbox + confirm
-  $ vpc bump --wait-checks                 Wait for CI to go green before merging
-  $ vpc bump --packages a,b --yes          Non-interactive, for scripts/CI
+  $ polyrepo bump --dry-run                     See the plan, nothing changes
+  $ polyrepo bump                               Interactive: checkbox + confirm
+  $ polyrepo bump --wait-checks                 Wait for CI to go green before merging
+  $ polyrepo bump --packages a,b --yes          Non-interactive, for scripts/CI
 `,
   )
   .action((opts) =>
@@ -264,9 +264,9 @@ checkbox pre-selects only what's actually ahead. Runs with a real terminal
 (not captured), so an npm 2FA/OTP prompt works normally.
 
 Examples:
-  $ vpc publish                            See what needs publishing, then publish it
-  $ vpc publish --dry-run                  Full build + pack, nothing actually published
-  $ vpc publish --packages a,b --yes       Non-interactive, for scripts/CI
+  $ polyrepo publish                            See what needs publishing, then publish it
+  $ polyrepo publish --dry-run                  Full build + pack, nothing actually published
+  $ polyrepo publish --packages a,b --yes       Non-interactive, for scripts/CI
 `,
   )
   .action((opts) =>
@@ -289,19 +289,19 @@ program
     'after',
     `
 For a package whose version was bumped some other way (not through
-\`vpc bump\`, or before it started tagging) — puts the \`v<version>\` tag on
-master's current tip, no version change and no PR, so \`vpc release\` has
+\`polyrepo bump\`, or before it started tagging) — puts the \`v<version>\` tag on
+master's current tip, no version change and no PR, so \`polyrepo release\` has
 something to work from. Re-syncs master first for each package, same as
 \`bump\` does. Already-tagged packages are shown but unchecked by default
 (picking one anyway just confirms the tag is there, harmless). After
 tagging, asks whether to create a GitHub Release right away for whatever
-was just tagged (same as running \`vpc release\` for exactly those
+was just tagged (same as running \`polyrepo release\` for exactly those
 packages) — \`--release\` answers that yes without asking, for scripts.
 
 Examples:
-  $ vpc tag                                See what needs tagging, tag it, then offered to release
-  $ vpc tag --dry-run                      Print the plan, tag and release nothing
-  $ vpc tag --packages a,b --yes --release Non-interactive: tag and release, for scripts/CI
+  $ polyrepo tag                                See what needs tagging, tag it, then offered to release
+  $ polyrepo tag --dry-run                      Print the plan, tag and release nothing
+  $ polyrepo tag --packages a,b --yes --release Non-interactive: tag and release, for scripts/CI
 `,
   )
   .action((opts) =>
@@ -323,20 +323,20 @@ program
   .addHelpText(
     'after',
     `
-A release always targets the tag \`vpc bump\` (or \`vpc tag\`, for a version
+A release always targets the tag \`polyrepo bump\` (or \`polyrepo tag\`, for a version
 that was already correct) already created for the package's current
 version (\`v<version>\`, e.g. v1.2.10) — \`--verify-tag\` is passed to
 \`gh release create\` so it fails loudly instead of inventing one. Packages
 with no tag yet for their current version show up disabled in the
-checkbox ("run \`vpc bump\` first"); ones already released are selectable
+checkbox ("run \`polyrepo bump\` first"); ones already released are selectable
 but unchecked, in case you want to re-run it. Release notes come from the
 matching CHANGELOG.md section when there is one, otherwise from gh's own
 --generate-notes (summarizing merged PRs/commits).
 
 Examples:
-  $ vpc release                            See what's tagged but not released, then release it
-  $ vpc release --dry-run                  Print the plan, create nothing
-  $ vpc release --packages a,b --yes       Non-interactive, for scripts/CI
+  $ polyrepo release                            See what's tagged but not released, then release it
+  $ polyrepo release --dry-run                  Print the plan, create nothing
+  $ polyrepo release --packages a,b --yes       Non-interactive, for scripts/CI
 `,
   )
   .action((opts) =>

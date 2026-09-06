@@ -54,7 +54,7 @@ export function addChangelogEntry(repo, version, commitLines) {
   fs.writeFileSync(filePath, updated.replace(/\n{3,}/g, '\n\n').trimEnd() + '\n')
 }
 
-// Pulls just the body of one version's section back out — used by `vpc
+// Pulls just the body of one version's section back out — used by `polyrepo
 // release` to seed GitHub Release notes from the changelog instead of
 // gh's own --generate-notes when a CHANGELOG.md entry already exists for
 // that version. Returns null if there's no changelog, no matching heading,
