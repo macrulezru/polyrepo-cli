@@ -9,6 +9,10 @@ import { publishCommand } from './commands/publish.js'
 import { tagCommand } from './commands/tag.js'
 import { releaseCommand } from './commands/release.js'
 import { setupCommand } from './commands/setup.js'
+import { execCommand } from './commands/exec.js'
+import { outdatedCommand } from './commands/outdated.js'
+import { prsCommand } from './commands/prs.js'
+import { cloneCommand } from './commands/clone.js'
 
 const program = new Command()
 
@@ -81,7 +85,7 @@ function wrapText(text, width) {
 program
   .name('polyrepo')
   .description(
-    'Manage local npm package repos: pick which directories to scan (setup), see their state (list) or run a health check (doctor), keep them on an up-to-date master (switch-master), release a patch version through a PR (bump), publish to npm (publish), tag an already-current version (tag), and create GitHub Releases (release).',
+    'Manage local npm package repos: pick which directories to scan (setup), clone missing ones from GitHub (clone), see their state (list), outdated dependencies (outdated), or open PRs (prs), run a health check (doctor), keep them on an up-to-date master (switch-master), release a version through a PR (bump), publish to npm (publish), tag an already-current version (tag), create GitHub Releases (release), or run any command across every repo (exec).',
   )
   .version('1.0.0')
   .option(
@@ -106,14 +110,18 @@ Getting started:
 
 Examples:
   $ polyrepo setup                              Add/edit/remove package source directories
+  $ polyrepo clone --org my-org                 Clone repos from GitHub that aren't local yet
   $ polyrepo doctor                             Check environment, auth, and dependency drift
   $ polyrepo list                               Show version + branch for every package
+  $ polyrepo outdated                           Show outdated dependencies across every package
+  $ polyrepo prs                                List open pull requests across every package
   $ polyrepo switch-master                      Update selected repos to the latest master
   $ polyrepo bump --dry-run                     Preview a version bump, nothing is pushed
-  $ polyrepo bump --packages a,b --yes          Bump specific packages non-interactively
+  $ polyrepo bump --minor --packages a,b --yes  Bump specific packages' minor version, non-interactively
   $ polyrepo publish                            Publish packages that are ahead of the registry
   $ polyrepo tag                                Tag an already-current version (no bump needed)
   $ polyrepo release                            Create GitHub Releases for tagged packages
+  $ polyrepo exec -- npm test                   Run any command across every (or selected) package
 
 Run \`polyrepo <command> --help\` for that command's own options and examples.
 `,
@@ -136,6 +144,44 @@ Examples:
 `,
   )
   .action(() => setupCommand({ configPath: program.opts().config }))
+
+program
+  .command('clone')
+  .description("Clone repos from a GitHub org/user that aren't already present under a root.")
+  .requiredOption('--org <name>', 'GitHub org or user to list repos from.')
+  .option('--root <path>', "Root directory to clone into (default: the config's first root).")
+  .option('--include-archived', 'Also offer archived repos (skipped by default).')
+  .option(...PACKAGES_OPTION)
+  .option(...YES_OPTION)
+  .option('--dry-run', 'Print what would be cloned, without actually cloning anything.')
+  .addHelpText(
+    'after',
+    `
+Lists every repo under --org (via \`gh repo list\`), compares it against the
+directory names already found under the target root, and offers to clone
+whatever's missing. Archived repos are skipped by default (--include-archived
+to include them). \`--packages\` here means "only offer these repo names",
+same as everywhere else. Cloning into a root that isn't in your config yet
+still works — you're just reminded to run \`polyrepo setup\` afterward so
+\`list\`/\`doctor\`/etc. pick the new repos up too.
+
+Examples:
+  $ polyrepo clone --org my-github-org
+  $ polyrepo clone --org my-github-org --root "C:\\work\\NPM" --yes
+  $ polyrepo clone --org my-github-org --dry-run
+`,
+  )
+  .action((opts) =>
+    cloneCommand({
+      configPath: program.opts().config,
+      org: opts.org,
+      root: opts.root,
+      includeArchived: Boolean(opts.includeArchived),
+      packages: opts.packages ? opts.packages.split(',') : undefined,
+      yes: Boolean(opts.yes),
+      dryRun: Boolean(opts.dryRun),
+    }),
+  )
 
 program
   .command('list')
@@ -162,6 +208,55 @@ Examples:
 `,
   )
   .action((opts) => listCommand({ configPath: program.opts().config, quick: Boolean(opts.quick) }))
+
+program
+  .command('outdated')
+  .description('Show outdated dependencies across every package (npm outdated).')
+  .option(...PACKAGES_OPTION)
+  .addHelpText(
+    'after',
+    `
+Read-only. Runs \`npm outdated --json\` for every package in parallel and
+prints one flat table: package, dependency, current/wanted/latest version.
+Packages with nothing outdated don't add any rows. \`--packages\` here just
+narrows which packages are checked — there's no checkbox, nothing to
+confirm.
+
+Examples:
+  $ polyrepo outdated
+  $ polyrepo outdated --packages vue-toast-kit,os-detect
+`,
+  )
+  .action((opts) =>
+    outdatedCommand({
+      configPath: program.opts().config,
+      packages: opts.packages ? opts.packages.split(',') : undefined,
+    }),
+  )
+
+program
+  .command('prs')
+  .description('List open pull requests across every package.')
+  .option(...PACKAGES_OPTION)
+  .addHelpText(
+    'after',
+    `
+Read-only. Runs \`gh pr list\` for every package in parallel and prints one
+flat table: package, PR number, title, branch, draft status. Packages with
+no open PRs don't add any rows — useful after an interrupted \`polyrepo bump\`
+run to see which packages still have a PR waiting to be merged by hand.
+
+Examples:
+  $ polyrepo prs
+  $ polyrepo prs --packages vue-toast-kit,os-detect
+`,
+  )
+  .action((opts) =>
+    prsCommand({
+      configPath: program.opts().config,
+      packages: opts.packages ? opts.packages.split(',') : undefined,
+    }),
+  )
 
 program
   .command('doctor')
@@ -212,8 +307,10 @@ Examples:
 
 program
   .command('bump')
-  .description('Pick packages, bump their patch version, PR, merge to master, and tag.')
+  .description('Pick packages, bump their version (patch by default), PR, merge to master, and tag.')
   .option('--dry-run', 'Print every step without pushing, opening, merging, or tagging anything for real.')
+  .option('--minor', 'Bump the minor version instead of patch (e.g. 1.2.9 → 1.3.0).')
+  .option('--major', 'Bump the major version instead of patch (e.g. 1.2.9 → 2.0.0).')
   .option(...PACKAGES_OPTION)
   .option(...YES_OPTION)
   .option('--wait-checks', 'Wait for CI checks on the PR (if any are configured) before merging; abort if they fail.')
@@ -222,7 +319,9 @@ program
     `
 Branch, PR, merge, and tag — no npm publish here, that's its own command
 (see \`polyrepo publish\`; for a GitHub Release from the resulting tag, see
-\`polyrepo release\`). Safe to re-run: if a previous attempt already pushed a
+\`polyrepo release\`). Bumps the patch version by default; \`--minor\`/\`--major\`
+bump that part instead (resetting the parts below it to 0, same as any
+semver tool). Safe to re-run: if a previous attempt already pushed a
 branch, opened a PR, or even merged it, this picks up from there instead of
 failing or duplicating work. If the package has a CHANGELOG.md, a draft
 entry (Keep a Changelog style, seeded from the commit log since the last
@@ -234,20 +333,27 @@ automatically).
 
 Examples:
   $ polyrepo bump --dry-run                     See the plan, nothing changes
-  $ polyrepo bump                               Interactive: checkbox + confirm
+  $ polyrepo bump                               Interactive: checkbox + confirm, patch bump
+  $ polyrepo bump --minor                       Interactive minor bump
   $ polyrepo bump --wait-checks                 Wait for CI to go green before merging
   $ polyrepo bump --packages a,b --yes          Non-interactive, for scripts/CI
 `,
   )
-  .action((opts) =>
-    bumpCommand({
+  .action((opts) => {
+    if (opts.minor && opts.major) {
+      console.error('Cannot combine --minor and --major — pick one.')
+      process.exitCode = 1
+      return
+    }
+    return bumpCommand({
       dryRun: Boolean(opts.dryRun),
       configPath: program.opts().config,
       packages: opts.packages ? opts.packages.split(',') : undefined,
       yes: Boolean(opts.yes),
       waitChecks: Boolean(opts.waitChecks),
-    }),
-  )
+      bumpType: opts.major ? 'major' : opts.minor ? 'minor' : 'patch',
+    })
+  })
 
 program
   .command('publish')
@@ -345,6 +451,43 @@ Examples:
       configPath: program.opts().config,
       packages: opts.packages ? opts.packages.split(',') : undefined,
       yes: Boolean(opts.yes),
+    }),
+  )
+
+program
+  .command('exec')
+  .description('Run an arbitrary command in each selected package.')
+  .argument('<cmd...>', 'Command to run, after a literal -- (e.g. `polyrepo exec -- npm test`).')
+  .option(...PACKAGES_OPTION)
+  .option(...YES_OPTION)
+  .option('--bail', 'Stop at the first package that exits non-zero, instead of continuing through the rest.')
+  .addHelpText(
+    'after',
+    `
+Shows a checkbox of every discovered package (all checked by default —
+"run everywhere" is the common case), then runs the given command in each
+selected one, one at a time, with a real terminal (its output, colors, and
+any prompts show up normally). A package that exits non-zero is reported
+and, by default, the run continues with the rest — pass --bail to stop
+immediately instead. A summary of any failed packages is printed at the
+end, and the process exits non-zero if any package failed.
+
+The command itself must come after a literal --, same as \`npm run <script> --\`
+— anything before it is parsed as polyrepo's own options.
+
+Examples:
+  $ polyrepo exec -- npm test                         Run tests everywhere
+  $ polyrepo exec --packages a,b --yes -- npm outdated Non-interactive, specific packages
+  $ polyrepo exec --bail -- npm run lint               Stop at the first package that fails lint
+`,
+  )
+  .action((cmd, opts) =>
+    execCommand({
+      configPath: program.opts().config,
+      packages: opts.packages ? opts.packages.split(',') : undefined,
+      yes: Boolean(opts.yes),
+      bail: Boolean(opts.bail),
+      cmd,
     }),
   )
 

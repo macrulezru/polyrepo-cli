@@ -1,6 +1,20 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { bumpPatch, replaceVersionInText } from '../src/version.js'
+import { bumpPatch, bumpVersion, replaceVersionInText } from '../src/version.js'
+
+test('bumpVersion bumps minor and resets patch to 0', () => {
+  assert.equal(bumpVersion('1.2.9', 'minor'), '1.3.0')
+  assert.equal(bumpVersion('1.2.9-beta.1', 'minor'), '1.3.0-beta.1')
+})
+
+test('bumpVersion bumps major and resets minor/patch to 0', () => {
+  assert.equal(bumpVersion('1.2.9', 'major'), '2.0.0')
+  assert.equal(bumpVersion('1.2.9-beta.1', 'major'), '2.0.0-beta.1')
+})
+
+test('bumpVersion defaults to patch', () => {
+  assert.equal(bumpVersion('1.2.9'), '1.2.10')
+})
 
 test('bumpPatch increments the patch number', () => {
   assert.equal(bumpPatch('1.2.9'), '1.2.10')
