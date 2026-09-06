@@ -6,16 +6,21 @@ import { loadConfig } from '../loadConfig.js'
 import { syncMaster } from '../masterSync.js'
 import { selectPackages } from '../selectPackages.js'
 import { heading, stepHeading, ok, fail, warn, columnWidths, formatRow } from '../ui.js'
+import { startSpinner } from '../spinner.js'
 
 export async function switchMasterCommand({ configPath, packages, yes = false } = {}) {
   const config = loadConfig({ configPath })
-  const repos = await inspectRepos(discoverRepos(config))
-  if (repos.length === 0) {
+  const discovered = discoverRepos(config)
+  if (discovered.length === 0) {
     console.log(pc.yellow('No repos found.'))
     return
   }
 
   heading(`Switch to ${MASTER_BRANCH}`)
+
+  const spinner = startSpinner(`Checking ${discovered.length} package(s)...`)
+  const repos = await inspectRepos(discovered)
+  spinner.stop()
 
   const selected = await selectPackages({
     items: repos,
