@@ -25,15 +25,28 @@ export function formatRow(row, columns, widths, separator = '  ') {
 
 // Minimal aligned-column table printer — no extra dependency needed for
 // the handful of columns this CLI ever shows.
-export function printTable(rows, columns) {
+//
+// `groupBy`, when given, inserts a blank line wherever its value changes
+// between consecutive rows — used by `outdated`/`prs`, where several rows
+// belong to the same package, to visually separate one package's rows from
+// the next instead of everything running together. Rows are expected to
+// already be grouped (i.e. sorted by whatever `groupBy` returns) — this
+// only looks at adjacent rows, it doesn't sort.
+export function printTable(rows, columns, { groupBy } = {}) {
   const widths = columnWidths(rows, columns)
   const header = columns.map((col, i) => (col.label ?? '').padEnd(widths[i])).join('  ')
   console.log('')
   console.log(pc.bold(header))
   console.log(pc.dim(widths.map((w) => '-'.repeat(w)).join('  ')))
-  for (const row of rows) {
+  let lastGroup
+  rows.forEach((row, i) => {
+    if (groupBy) {
+      const group = groupBy(row)
+      if (i > 0 && group !== lastGroup) console.log('')
+      lastGroup = group
+    }
     console.log(formatRow(row, columns, widths))
-  }
+  })
 }
 
 export function heading(text) {

@@ -10,7 +10,7 @@ import { pMap } from '../pMap.js'
 import { printTable, heading } from '../ui.js'
 import { startSpinner } from '../spinner.js'
 
-export async function listCommand({ configPath, quick = false } = {}) {
+export async function listCommand({ configPath, quick = false, showPath = false } = {}) {
   const config = loadConfig({ configPath })
   const repos = discoverRepos(config)
   if (repos.length === 0) {
@@ -26,6 +26,7 @@ export async function listCommand({ configPath, quick = false } = {}) {
 
   const columns = [
     { label: 'Package', value: (r) => r.dir },
+    ...(showPath ? [{ label: 'Path', value: (r) => r.path, style: (r, text) => pc.dim(text) }] : []),
     { label: 'Version', value: (r) => r.version ?? '?' },
     {
       label: 'Branch',

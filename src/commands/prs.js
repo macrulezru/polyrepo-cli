@@ -51,11 +51,15 @@ export async function prsCommand({ configPath, packages } = {}) {
     return
   }
 
-  printTable(rows, [
-    { label: 'Package', value: (r) => r.dir },
-    { label: 'PR', value: (r) => r.number, style: (r, t) => pc.dim(t) },
-    { label: 'Title', value: (r) => r.title },
-    { label: 'Branch', value: (r) => r.branch, style: (r, t) => pc.dim(t) },
-    { label: 'Status', value: (r) => (r.draft ? 'draft' : ''), style: (r, t) => pc.yellow(t) },
-  ])
+  printTable(
+    rows,
+    [
+      { label: 'Package', value: (r) => r.dir },
+      { label: 'PR', value: (r) => r.number, style: (r, t) => pc.dim(t) },
+      { label: 'Title', value: (r) => r.title },
+      { label: 'Branch', value: (r) => r.branch, style: (r, t) => pc.dim(t) },
+      { label: 'Status', value: (r) => (r.draft ? 'draft' : ''), style: (r, t) => pc.yellow(t) },
+    ],
+    { groupBy: (r) => r.dir },
+  )
 }

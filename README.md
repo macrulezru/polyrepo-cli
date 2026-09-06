@@ -184,21 +184,33 @@ Read-only. The git/tag/release/npm checks run in parallel across
 packages, but they're still real network calls (tag, release, and
 registry — three per package), so a full `polyrepo list` across many
 packages takes a few seconds rather than being instant. Use `--quick`
-for just version/branch/git status when that's all you need.
+for just version/branch/git status when that's all you need. Add
+`--path` for a **Path** column (right after Package) showing where
+each one actually lives on disk — handy once packages come from a mix
+of `roots` and one-off `packages` entries and the directory name alone
+doesn't say where to find it.
 
 ```bash
 polyrepo list
 
 # version/branch/git only — no network calls
 polyrepo list --quick
+
+# also show each package's directory
+polyrepo list --path
 ```
 
 ### `polyrepo outdated`
 
 Read-only. Runs `npm outdated --json` for every package in parallel
-and prints one flat table (Package, Dependency, Current, Wanted,
-Latest) instead of running it in each repo by hand. Packages with
-nothing outdated just don't add any rows.
+and prints one table (Package, Dependency, Current, Wanted, Latest)
+instead of running it in each repo by hand — with a blank line
+between each package's rows for readability, and a summary line above
+the table (`N dependencies outdated across M package(s), K of them
+major version behind`). The **Latest** column is colored by how far
+behind it is — red for a major bump, yellow for minor, dim for patch
+— so what actually needs a look stands out from routine bumps.
+Packages with nothing outdated just don't add any rows.
 
 ```bash
 polyrepo outdated
