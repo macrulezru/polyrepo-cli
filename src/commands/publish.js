@@ -5,18 +5,28 @@ import { loadConfig } from '../loadConfig.js'
 import { npm } from '../exec.js'
 import { fetchPublishedVersionAsync } from '../registry.js'
 import { selectPackages } from '../selectPackages.js'
+import { filterByNames } from '../filterByNames.js'
 import { pMap } from '../pMap.js'
-import { heading, stepHeading, ok, fail, columnWidths, formatRow } from '../ui.js'
+import { heading, stepHeading, ok, fail, warn, columnWidths, formatRow } from '../ui.js'
 
 export async function publishCommand({ configPath, packages, yes = false, dryRun = false } = {}) {
   const config = loadConfig({ configPath })
-  const repos = (await inspectRepos(discoverRepos(config))).filter((r) => r.version)
-  if (repos.length === 0) {
+  const allRepos = (await inspectRepos(discoverRepos(config))).filter((r) => r.version)
+  if (allRepos.length === 0) {
     console.log(pc.yellow('No repos found.'))
     return
   }
 
   heading('Publish to npm')
+
+  // Narrowed to --packages up front (a no-op when it wasn't given) — no
+  // reason to hit the registry for, or print the status of, packages
+  // nobody asked to publish.
+  const repos = filterByNames(allRepos, packages)
+  if (repos.length === 0) {
+    console.log(pc.dim('Nothing selected.'))
+    return
+  }
 
   console.log(pc.dim(`Checking ${repos.length} package(s) against the registry...`))
   // Each repo's registry lookup is a real network round trip — running them
@@ -34,7 +44,11 @@ export async function publishCommand({ configPath, packages, yes = false, dryRun
 
   const selected = await selectPackages({
     items: withRegistry,
-    packages,
+    // repos above is already the exact --packages match — passing those
+    // same dir names back through here just skips the checkbox (as
+    // before) without filterByNames re-warning about anything, since
+    // there's nothing left for it to not find.
+    packages: packages ? withRegistry.map((r) => r.dir) : undefined,
     message: 'Pick packages to publish:',
     buildChoice: (all) => {
       const columns = [
@@ -68,6 +82,8 @@ export async function publishCommand({ configPath, packages, yes = false, dryRun
     }
   }
 
+  if (!dryRun && !(await ensureNpmLogin())) return
+
   let index = 0
   for (const repo of selected) {
     index += 1
@@ -79,4 +95,25 @@ export async function publishCommand({ configPath, packages, yes = false, dryRun
     if (!result.ok) fail(`npm publish failed (exit ${result.status}).`)
     else ok(`Published ${repo.name}@${repo.version}${dryRun ? ' (dry run).' : '.'}`)
   }
+}
+
+// Without this, a batch of several packages would only find out about a
+// missing/expired npm login at the very end of the first `npm publish` —
+// after everything before it in the run (fetch, checkout, confirmation)
+// already succeeded. Checked once for the whole batch, not per package,
+// since npm auth isn't per-repo. `npm login` needs a real terminal — it
+// can open a browser for npm's web-based OTP flow, or prompt directly.
+async function ensureNpmLogin() {
+  if (npm('.', ['whoami'], { quiet: true }).ok) return true
+
+  warn('Not logged in to npm — running `npm login` first.')
+  npm('.', ['login'], { interactive: true })
+
+  if (npm('.', ['whoami'], { quiet: true }).ok) {
+    ok('Logged in to npm.')
+    return true
+  }
+
+  fail('npm login did not succeed — aborting before publishing anything.')
+  return false
 }

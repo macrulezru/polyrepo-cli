@@ -6,18 +6,28 @@ import { tagName, tagExists } from '../tags.js'
 import { releaseExistsAsync, createRelease } from '../release.js'
 import { extractChangelogSection } from '../changelog.js'
 import { selectPackages } from '../selectPackages.js'
+import { filterByNames } from '../filterByNames.js'
 import { pMap } from '../pMap.js'
 import { heading, stepHeading, ok, fail, columnWidths, formatRow } from '../ui.js'
 
 export async function releaseCommand({ configPath, packages, yes = false, dryRun = false } = {}) {
   const config = loadConfig({ configPath })
-  const repos = (await inspectRepos(discoverRepos(config))).filter((r) => r.version)
-  if (repos.length === 0) {
+  const allRepos = (await inspectRepos(discoverRepos(config))).filter((r) => r.version)
+  if (allRepos.length === 0) {
     console.log(pc.yellow('No repos found.'))
     return
   }
 
   heading('GitHub releases')
+
+  // Narrowed to --packages up front (a no-op when it wasn't given) — no
+  // reason to check, or print the tag/release status of, packages nobody
+  // asked about.
+  const repos = filterByNames(allRepos, packages)
+  if (repos.length === 0) {
+    console.log(pc.dim('Nothing selected.'))
+    return
+  }
 
   console.log(pc.dim(`Checking ${repos.length} package(s) for a tag and an existing release...`))
   // A release always targets `v<local version>` — the tag `polyrepo bump`
@@ -48,7 +58,10 @@ export async function releaseCommand({ configPath, packages, yes = false, dryRun
 
   const selected = await selectPackages({
     items: withStatus,
-    packages,
+    // withStatus is already the exact --packages match — passing those
+    // same dir names back here just skips the checkbox without
+    // re-warning about anything (see publish.js for the same pattern).
+    packages: packages ? withStatus.map((r) => r.dir) : undefined,
     message: 'Pick packages to create a GitHub Release for:',
     buildChoice: (all) => {
       const columns = [

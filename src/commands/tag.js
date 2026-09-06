@@ -5,6 +5,7 @@ import { loadConfig } from '../loadConfig.js'
 import { syncMaster } from '../masterSync.js'
 import { tagName, tagExists, tagExistsAsync, createAndPushTag } from '../tags.js'
 import { selectPackages } from '../selectPackages.js'
+import { filterByNames } from '../filterByNames.js'
 import { pMap } from '../pMap.js'
 import { heading, stepHeading, ok, fail, columnWidths, formatRow } from '../ui.js'
 import { releaseOne } from './release.js'
@@ -18,13 +19,22 @@ import { releaseOne } from './release.js'
 // release for it" are almost always the same reason to run this.
 export async function tagCommand({ configPath, packages, yes = false, dryRun = false, release = false } = {}) {
   const config = loadConfig({ configPath })
-  const repos = (await inspectRepos(discoverRepos(config))).filter((r) => r.version)
-  if (repos.length === 0) {
+  const allRepos = (await inspectRepos(discoverRepos(config))).filter((r) => r.version)
+  if (allRepos.length === 0) {
     console.log(pc.yellow('No repos found.'))
     return
   }
 
   heading('Tag current versions')
+
+  // Narrowed to --packages up front (a no-op when it wasn't given) — no
+  // reason to check, or print the tag status of, packages nobody asked
+  // about.
+  const repos = filterByNames(allRepos, packages)
+  if (repos.length === 0) {
+    console.log(pc.dim('Nothing selected.'))
+    return
+  }
 
   console.log(pc.dim(`Checking ${repos.length} package(s) for an existing tag...`))
   const withTag = await pMap(repos, async (r) => {
@@ -36,7 +46,10 @@ export async function tagCommand({ configPath, packages, yes = false, dryRun = f
 
   const selected = await selectPackages({
     items: withTag,
-    packages,
+    // withTag is already the exact --packages match — passing those same
+    // dir names back here just skips the checkbox without re-warning
+    // about anything (see publish.js for the same pattern).
+    packages: packages ? withTag.map((r) => r.dir) : undefined,
     message: 'Pick packages to tag at their current version:',
     buildChoice: (all) => {
       const columns = [
