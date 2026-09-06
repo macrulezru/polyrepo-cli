@@ -517,7 +517,7 @@ files on disk rather than mocks.
 
 ## Author
 
-Built by [VueCraft](https://vuecraft.ru/en/).
+Danil Lisin Vladimirovich, aka Macrulez — [macrulez.ru/en](https://macrulez.ru/en)
 
 ## License
 
