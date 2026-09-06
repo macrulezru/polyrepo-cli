@@ -28,6 +28,7 @@ export function formatRow(row, columns, widths, separator = '  ') {
 export function printTable(rows, columns) {
   const widths = columnWidths(rows, columns)
   const header = columns.map((col, i) => (col.label ?? '').padEnd(widths[i])).join('  ')
+  console.log('')
   console.log(pc.bold(header))
   console.log(pc.dim(widths.map((w) => '-'.repeat(w)).join('  ')))
   for (const row of rows) {
