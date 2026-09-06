@@ -7,10 +7,20 @@ import { releaseExistsAsync } from '../release.js'
 import { fetchPublishedVersionAsync } from '../registry.js'
 import { findStaleLocalDeps } from '../crossDeps.js'
 import { pMap } from '../pMap.js'
-import { printTable, heading } from '../ui.js'
+import { printTable, heading, ok, fail } from '../ui.js'
 import { startSpinner } from '../spinner.js'
+import { EXPORT_FORMATS, exportTable, inferExportFormat, writeExport } from '../export.js'
 
-export async function listCommand({ configPath, quick = false, showPath = false } = {}) {
+export async function listCommand({ configPath, quick = false, showPath = false, format, output } = {}) {
+  if (format && !EXPORT_FORMATS.includes(format)) {
+    fail(`Unknown --format "${format}" — expected one of: ${EXPORT_FORMATS.join(', ')}.`)
+    return
+  }
+  if (format && !output) {
+    fail('--format only matters together with --output <path> — nothing to export it to.')
+    return
+  }
+
   const config = loadConfig({ configPath })
   const repos = discoverRepos(config)
   if (repos.length === 0) {
@@ -39,6 +49,8 @@ export async function listCommand({ configPath, quick = false, showPath = false 
       style: (r, text) => (r.clean ? pc.dim(text) : pc.red(text)),
     },
   ]
+
+  let finalRows = rows
 
   if (!quick) {
     // Cross-package dependency drift is cheap (no network — just the
@@ -82,9 +94,14 @@ export async function listCommand({ configPath, quick = false, showPath = false 
       },
     )
 
-    printTable(withReleaseInfo, columns)
-    return
+    finalRows = withReleaseInfo
   }
 
-  printTable(rows, columns)
+  printTable(finalRows, columns)
+
+  if (output) {
+    const resolvedFormat = format ?? inferExportFormat(output)
+    const savedPath = writeExport(output, exportTable(finalRows, columns, resolvedFormat))
+    ok(`Saved ${resolvedFormat.toUpperCase()} to ${savedPath}.`)
+  }
 }
