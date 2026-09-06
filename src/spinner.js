@@ -9,7 +9,7 @@ const CLEAR_LINE = '\r\x1b[K'
 
 // Covers the "nothing is printed for several seconds" gap while a parallel
 // batch (pMap) is in flight and there's no per-item progress to show yet —
-// list's full mode, doctor, and the initial repo scan in bump/switch-master
+// list's full mode, doctor, and the initial repo scan in bump/switch-default
 // all used to just sit there silently. Falls back to a single static line
 // when stdout isn't a real terminal (piped output, CI logs) — redrawing
 // with carriage returns there would just dump a stream of raw \r bytes

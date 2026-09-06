@@ -6,7 +6,7 @@ import { Command } from 'commander'
 import pc from 'picocolors'
 import { listCommand } from './commands/list.js'
 import { doctorCommand } from './commands/doctor.js'
-import { switchMasterCommand } from './commands/switchMaster.js'
+import { switchDefaultCommand } from './commands/switchDefault.js'
 import { bumpCommand } from './commands/bump.js'
 import { publishCommand } from './commands/publish.js'
 import { tagCommand } from './commands/tag.js'
@@ -94,7 +94,7 @@ function wrapText(text, width) {
 program
   .name('polyrepo')
   .description(
-    'Manage local npm package repos: pick which directories to scan (setup), clone missing ones from GitHub (clone), see their state (list), outdated dependencies (outdated), or open PRs (prs), run a health check (doctor), keep them on an up-to-date default branch (switch-master), release a version through a PR (bump), publish to npm (publish), tag an already-current version (tag), create GitHub Releases (release), or run any command across every repo (exec).',
+    'Manage local npm package repos: pick which directories to scan (setup), clone missing ones from GitHub (clone), see their state (list), outdated dependencies (outdated), or open PRs (prs), run a health check (doctor), keep them on an up-to-date default branch (switch-default), release a version through a PR (bump), publish to npm (publish), tag an already-current version (tag), create GitHub Releases (release), or run any command across every repo (exec).',
   )
   .version(CLI_VERSION)
   .option(
@@ -124,7 +124,7 @@ Examples:
   $ polyrepo list                               Show version + branch for every package
   $ polyrepo outdated                           Show outdated dependencies across every package
   $ polyrepo prs                                List open pull requests across every package
-  $ polyrepo switch-master                      Update selected repos to their latest default branch
+  $ polyrepo switch-default                     Update selected repos to their latest default branch
   $ polyrepo bump --dry-run                     Preview a version bump, nothing is pushed
   $ polyrepo bump --minor --packages a,b --yes  Bump specific packages' minor version, non-interactively
   $ polyrepo publish                            Publish packages that are ahead of the registry
@@ -322,7 +322,7 @@ non-destructive self-repair:
   Branch sync           fetches and compares each repo's local default
                         branch against origin: diverged (needs manual
                         resolution), behind only (safe to fast-forward with
-                        \`switch-master\`), or ahead only (unpushed local
+                        \`switch-default\`), or ahead only (unpushed local
                         commits) — surfaced before a command trips over it.
   Branch protection     whether each repo's default branch actually has
                         GitHub branch protection enabled. Report-only —
@@ -355,14 +355,18 @@ Examples:
   )
 
 program
-  .command('switch-master')
-  .alias('sm')
+  .command('switch-default')
+  .alias('sd')
   .description('Pick repos and switch each to its up-to-date default branch.')
   .option(...PACKAGES_OPTION)
   .option(...YES_OPTION)
   .option(
     '--force',
     "Discard uncommitted changes and any local-only commits on a repo's default branch, hard-resetting it to match origin.",
+  )
+  .option(
+    '--clean',
+    'With --force, also remove untracked files/directories (git clean -fd) — only valid together with --force.',
   )
   .addHelpText(
     'after',
@@ -380,25 +384,36 @@ to resolve by hand.
 selected repo gets \`git checkout -f <default branch>\` + \`git reset --hard
 origin/<default branch>\` instead of the safe fast-forward-only merge —
 uncommitted changes to tracked files and any local-only commits on that
-branch are permanently discarded (untracked files are left alone, this
-isn't \`git clean\`). The proceed confirmation says how many selected
-repos are dirty and defaults to "No" when --force would actually discard
-something.
+branch are permanently discarded. Untracked files are still left alone
+at this point (this isn't \`git clean\`) — add --clean to also run
+\`git clean -fd\` (removes untracked files/directories that aren't
+gitignored; gitignored paths like node_modules are still left alone,
+this doesn't use -x). --clean only means anything alongside --force —
+without it there's nothing to discard in the first place. The proceed
+confirmation says how many selected repos are dirty and defaults to
+"No" when --force would actually discard something.
 
 Examples:
-  $ polyrepo switch-master
-  $ polyrepo sm --packages vue-toast-kit,os-detect --yes
-  $ polyrepo sm --packages vue-toast-kit --force   Discard its local changes and hard-reset to origin
+  $ polyrepo switch-default
+  $ polyrepo sd --packages vue-toast-kit,os-detect --yes
+  $ polyrepo sd --packages vue-toast-kit --force   Discard its local changes and hard-reset to origin
+  $ polyrepo sd --packages vue-toast-kit --force --clean   Also remove untracked build output etc.
 `,
   )
-  .action((opts) =>
-    switchMasterCommand({
+  .action((opts) => {
+    if (opts.clean && !opts.force) {
+      console.error('--clean only makes sense together with --force.')
+      process.exitCode = 1
+      return
+    }
+    return switchDefaultCommand({
       configPath: program.opts().config,
       packages: opts.packages ? opts.packages.split(',') : undefined,
       yes: Boolean(opts.yes),
       force: Boolean(opts.force),
-    }),
-  )
+      clean: Boolean(opts.clean),
+    })
+  })
 
 program
   .command('bump')

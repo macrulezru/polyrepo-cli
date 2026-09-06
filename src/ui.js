@@ -1,7 +1,7 @@
 import pc from 'picocolors'
 
 // Column width/row-formatting is shared by `printTable` (the `list` output)
-// and by the checkbox choice labels in `bump`/`switch-master`/`publish` —
+// and by the checkbox choice labels in `bump`/`switch-default`/`publish` —
 // so a package name column lines up the same way whether it's shown in a
 // static table or as a pickable list, instead of each command reinventing
 // its own ad-hoc padding (which is how columns used to drift out of line

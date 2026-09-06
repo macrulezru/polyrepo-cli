@@ -30,9 +30,11 @@ with `--dry-run` before anything actually changes.
   safe, non-destructive self-repairs along the way, and
   `--clean-branches` for an interactive local-branch cleanup), and
   cross-package dependency drift.
-- **`switch-master`** — fast-forward selected repos to their up-to-date
+- **`switch-default`** — fast-forward selected repos to their up-to-date
   default branch, whatever it's actually named (`master`, `main`, or
-  anything else — detected per repo, not assumed).
+  anything else — detected per repo, not assumed). `--force` hard-resets
+  a dirty repo to match origin; add `--clean` to also wipe untracked
+  files/directories.
 - **`bump`** — bump a package's version (patch by default, or
   `--minor`/`--major`) through a branch → PR → merge, then tag the
   release. Safe to re-run if a previous attempt was interrupted
@@ -284,8 +286,8 @@ few small, non-destructive self-repairs:
 3. **Remote sync** — two related repairs, both per-repo pointer
    refreshes that never touch a file, branch, or commit:
    - compares each repo's locally cached default-branch name (the
-     same value `switch-master`/`bump`/`tag` all use — see
-     `switch-master` above) against what GitHub actually reports
+     same value `switch-default`/`bump`/`tag` all use — see
+     `switch-default` above) against what GitHub actually reports
      right now. Git never refreshes that local cache on its own, so
      renaming a repo's default branch on GitHub after it was cloned
      would otherwise go unnoticed by every other command forever —
@@ -302,7 +304,7 @@ few small, non-destructive self-repairs:
 4. **Branch sync** — fetches and compares each repo's local default
    branch against `origin/<default>`: **diverged** (both ahead and
    behind — a fast-forward won't work, needs resolving by hand),
-   **behind only** (safe to fast-forward with `switch-master`), or
+   **behind only** (safe to fast-forward with `switch-default`), or
    **ahead only** (local commits not yet pushed). Surfaces this
    before some other command trips over it mid-run instead of after.
 5. **Branch protection** — whether each repo's default branch
@@ -345,7 +347,7 @@ polyrepo doctor --clean-branches
 polyrepo doctor
 ```
 
-### `polyrepo switch-master` (alias `sm`)
+### `polyrepo switch-default` (alias `sd`)
 
 Each repo's **default branch is detected per repo**, not assumed —
 GitHub itself defaults a new repo to `main`, and plenty of people
@@ -374,11 +376,15 @@ working tree is no longer skipped, and each repo gets
 `git checkout -f <default branch>` + `git reset --hard
 origin/<default branch>` instead of the safe fast-forward-only merge —
 uncommitted changes to tracked files and any local-only commits on
-that branch are permanently discarded (untracked files are left
-alone, this isn't `git clean`). The checkbox marks which selected
-repos would lose changes, and the proceed confirmation says how many
-and defaults to "No" instead of "Yes" whenever `--force` would
-actually discard something.
+that branch are permanently discarded. Untracked files are still left
+alone at this point (this isn't `git clean`) — add `--clean` to also
+run `git clean -fd` (removes untracked files/directories that aren't
+gitignored; gitignored paths like `node_modules` are still left
+alone, this doesn't use `-x`). `--clean` only means anything alongside
+`--force` — without it there's nothing to discard in the first place.
+The checkbox marks which selected repos would lose changes, and the
+proceed confirmation says how many and defaults to "No" instead of
+"Yes" whenever `--force` would actually discard something.
 
 **Options:**
 
@@ -387,15 +393,19 @@ actually discard something.
 | `--packages <a,b,c>` | Package list instead of the interactive checkbox. |
 | `--yes` | Skip the "proceed?" confirmation. |
 | `--force` | Discard uncommitted changes and local-only commits on the default branch, hard-resetting it to origin. |
+| `--clean` | With `--force`, also remove untracked files/directories (`git clean -fd`). |
 
 ```bash
-polyrepo switch-master
+polyrepo switch-default
 
 # no checkbox, specific repos, no confirmation — for scripts
-polyrepo switch-master --packages vue-toast-kit,os-detect --yes
+polyrepo switch-default --packages vue-toast-kit,os-detect --yes
 
 # discard local changes on a repo you don't need anymore
-polyrepo switch-master --packages vue-toast-kit --force
+polyrepo switch-default --packages vue-toast-kit --force
+
+# same, but also wipe untracked build output etc.
+polyrepo switch-default --packages vue-toast-kit --force --clean
 ```
 
 ### `polyrepo bump [options]`
@@ -415,7 +425,7 @@ polyrepo switch-master --packages vue-toast-kit --force
    1. `git fetch origin` → `git checkout <default branch>` →
       `git merge --ff-only origin/<default branch>` (the bump branch
       is always created from an up-to-date default branch — detected
-      per repo, see `switch-master` above — not whatever branch the
+      per repo, see `switch-default` above — not whatever branch the
       repo happened to be on);
    2. **checks the state of a previous attempt** — is there already a
       merged PR, an open PR, or just a pushed branch named

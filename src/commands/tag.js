@@ -2,7 +2,7 @@ import { confirm } from '@inquirer/prompts'
 import pc from 'picocolors'
 import { discoverRepos, inspectRepos } from '../repos.js'
 import { loadConfig } from '../loadConfig.js'
-import { syncMaster } from '../masterSync.js'
+import { syncDefaultBranch } from '../defaultBranchSync.js'
 import { tagName, tagExists, tagExistsAsync, createAndPushTag } from '../tags.js'
 import { selectPackages } from '../selectPackages.js'
 import { filterByNames } from '../filterByNames.js'
@@ -88,7 +88,7 @@ export async function tagCommand({ configPath, packages, yes = false, dryRun = f
     index += 1
     stepHeading(index, selected.length, `${repo.dir}  ${repo.tag}`)
 
-    const syncResult = syncMaster(repo)
+    const syncResult = syncDefaultBranch(repo)
     if (!syncResult.ok) {
       fail(syncResult.message)
       continue

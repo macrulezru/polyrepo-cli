@@ -6,7 +6,7 @@ import { bumpBranchName } from '../config.js'
 import { loadConfig } from '../loadConfig.js'
 import { bumpVersion, replaceVersionInText } from '../version.js'
 import { git } from '../exec.js'
-import { syncMaster } from '../masterSync.js'
+import { syncDefaultBranch } from '../defaultBranchSync.js'
 import { detectBumpState, createPr, mergePr } from '../github.js'
 import { tagName, tagExists, createAndPushTag } from '../tags.js'
 import { describeRecentChangesForAll, formatRecentChanges, fullCommitLinesSince } from '../changes.js'
@@ -111,7 +111,7 @@ async function bumpOne(repo, { dryRun, waitChecks }) {
     return
   }
 
-  const syncResult = syncMaster(repo)
+  const syncResult = syncDefaultBranch(repo)
   if (!syncResult.ok) return fail(syncResult.message)
   ok(`${repo.defaultBranch} is up to date.`)
 
@@ -193,7 +193,7 @@ async function bumpOne(repo, { dryRun, waitChecks }) {
     }
     ok(`Merged PR #${prNumber}.`)
 
-    const resyncResult = syncMaster(repo)
+    const resyncResult = syncDefaultBranch(repo)
     if (!resyncResult.ok) return fail(resyncResult.message)
     ok(`Local ${repo.defaultBranch} synced to origin at ${repo.newVersion}.`)
   } else {
