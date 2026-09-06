@@ -1,0 +1,6 @@
+node_modules/
+
+# Personal — points at this machine's own package repos. Ship
+# vpc.config.example.json instead; each user creates their own via
+# `vpc setup` (or by copying the example).
+vpc.config.json

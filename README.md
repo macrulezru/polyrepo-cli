@@ -1,0 +1,524 @@
+# polyrepo-cli
+
+An interactive CLI for managing a folder of local npm package repos:
+version bumps through a pull request, npm publishing, GitHub releases,
+and cross-package dependency drift — all from one tool, all reviewable
+with `--dry-run` before anything actually changes.
+
+## Features
+
+- **`setup`** — add, edit, or remove the package directories the CLI
+  scans, right from the terminal — no hand-editing JSON.
+- **`list`** — one table per package: version, branch, git status, git
+  tag, GitHub Release, npm registry status, and cross-package
+  dependency drift. `list --quick` skips the network checks for an
+  instant version/branch/git-only view.
+- **`doctor`** — a one-command health check: is the environment set up
+  correctly (Node/git/gh/npm, authentication), and does any local
+  package still depend on an incompatible version of another local
+  package.
+- **`switch-master`** — fast-forward selected repos to an up-to-date
+  `master`.
+- **`bump`** — bump a package's patch version through a branch → PR →
+  merge, then tag the release. Safe to re-run if a previous attempt
+  was interrupted partway — it picks up from wherever it left off
+  instead of failing or duplicating work. Can wait for CI checks
+  before merging (`--wait-checks`), and drafts a `CHANGELOG.md` entry
+  when the package already has one.
+- **`publish`** — run `npm publish` for the packages that are actually
+  ahead of the registry, after comparing each one automatically.
+- **`tag`** — tag a package at its *current* version without bumping
+  again, for when the version was already moved forward some other
+  way. Offers to create a GitHub Release right after.
+- **`release`** — create a GitHub Release from a tag, with notes
+  pulled from the matching `CHANGELOG.md` section when there is one.
+- Every command that touches multiple repos supports `--packages` and
+  `--yes` for fully non-interactive use in scripts.
+
+Everywhere a checkbox list appears, columns line up consistently
+across commands, and read-only checks across many packages (versions,
+tags, releases, registry state) run in parallel instead of one at a
+time. Mutating steps (commit, push, merge) always run one package at a
+time, printing each step as it happens, so progress stays easy to
+follow.
+
+## Requirements
+
+- Node.js 20+
+- `git` on `PATH`
+- [`gh`](https://cli.github.com/) (GitHub CLI), authenticated
+  (`gh auth status`) — needed for opening/merging pull requests,
+  checking the state of a previous `bump` attempt, CI checks
+  (`bump --wait-checks`), and `tag`/`release`
+- `npm` on `PATH`, authenticated (`npm whoami`) — needed only for
+  `publish`
+
+Run `vpc doctor` to check all of this in one go.
+
+## Installation
+
+```bash
+git clone <this repository's URL>
+cd polyrepo-cli
+npm install
+```
+
+Optionally, make `vpc` available everywhere:
+
+```bash
+npm link
+```
+
+Without `npm link`, run commands as `node src/index.js <command>`.
+
+## Quick start
+
+```bash
+vpc setup      # tell it where your package repos live
+vpc doctor     # confirm the environment is set up correctly
+vpc list       # see version/branch/tag/release/npm status for everything
+```
+
+## Help
+
+Every command has built-in `--help`:
+
+```bash
+vpc --help
+vpc bump --help
+```
+
+`vpc --help` lists every command together with its flags, so you
+rarely need to open a command's own `--help` just to remember an
+option name.
+
+## Commands
+
+### `vpc setup`
+
+An interactive menu for `vpc.config.json` itself — no need to open the
+JSON by hand. Shows the current `roots` and `packages` lists with
+`✓ exists` / `✗ not found` (and, for `packages`, `! no
+package.json/.git here` when the folder exists but isn't a package),
+and lets you:
+
+- add a root or package directory
+- edit an existing entry
+- remove an entry (with confirmation)
+
+A path isn't checked strictly — adding one that doesn't exist yet
+just prints a warning, in case the folder shows up later. Changes are
+only written to disk when you choose "Save and exit"; "Discard changes
+and exit" throws away anything done in that session.
+
+```bash
+vpc setup
+
+# edit a non-default config
+vpc setup --config "/path/to/vpc.config.json"
+```
+
+### `vpc list` (alias `ls`)
+
+A table of every discovered package. Full summary by default:
+
+| Column | Shows |
+| --- | --- |
+| Package / Version / Branch | directory name, `package.json` version, current branch |
+| Git | whether the working tree is clean or dirty |
+| Tag | the `v<version>` tag for the current version, if it exists, else `—` |
+| Release | whether that tag has a GitHub Release (`✓`/`✗`/`—` if untagged) |
+| npm | `✓` if the registry matches the local version, else the registry version or `unpublished` |
+| Deps | `✓`, or `⚠ N` — how many other local packages reference this one with a version range that no longer matches (same check as `doctor` and the end of `bump`) |
+
+Read-only. The git/tag/release/npm checks run in parallel across
+packages, but they're still real network calls (tag, release, and
+registry — three per package), so a full `vpc list` across many
+packages takes a few seconds rather than being instant. Use `--quick`
+for just version/branch/git status when that's all you need.
+
+```bash
+vpc list
+
+# version/branch/git only — no network calls
+vpc list --quick
+```
+
+### `vpc doctor`
+
+A read-only health check in three sections:
+
+1. **Environment** — Node.js version (20+ required), whether
+   `git`/`gh`/`npm` are on `PATH`, and whether `gh`/`npm` are
+   authenticated (npm auth is only a warning — it's only needed for
+   `publish`).
+2. **Config** — how many packages the current config actually
+   resolves to, and which repos are dirty or off `master`.
+3. **Cross-package dependencies** — the same dependency-drift check
+   that runs at the end of `bump`, available on demand without
+   bumping anything.
+
+Worth running first if any other command is behaving unexpectedly.
+
+```bash
+vpc doctor
+```
+
+### `vpc switch-master` (alias `sm`)
+
+1. Shows a checkbox list of every repo with its current branch; repos
+   not currently on `master` are pre-selected.
+2. After confirming, for each selected repo, one at a time (each
+   step's result prints immediately, not after the whole batch):
+   - a dirty working tree is skipped with a warning, untouched;
+   - otherwise: `git fetch origin` → `git checkout master` →
+     `git merge --ff-only origin/master`.
+3. If local `master` has diverged from `origin/master` (fast-forward
+   isn't possible), that repo is reported and left alone to resolve by
+   hand — no `--force`/`reset --hard` is ever used.
+
+```bash
+vpc switch-master
+
+# no checkbox, specific repos, no confirmation — for scripts
+vpc switch-master --packages vue-toast-kit,os-detect --yes
+```
+
+### `vpc bump [options]`
+
+1. Shows a checkbox of packages with their current version and the
+   version they'd bump to (`1.2.9 → 1.2.10`, always a patch). Packages
+   with a dirty working tree are marked — they'll be skipped. The
+   highlighted package's description shows what's actually changed
+   since the last git tag (`git log <tag>..master`) — if that's empty,
+   there's probably nothing worth bumping. These previews are computed
+   for every package in parallel, not one at a time.
+2. After confirming, for each selected package, one at a time, with
+   live progress:
+   1. `git fetch origin` → `git checkout master` →
+      `git merge --ff-only origin/master` (the bump branch is always
+      created from an up-to-date master, not whatever branch the repo
+      happened to be on);
+   2. **checks the state of a previous attempt** — is there already a
+      merged PR, an open PR, or just a pushed branch named
+      `<new-version>-version-bump` (e.g. `1.2.10-version-bump` — the
+      version number at the start of the branch name guarantees two
+      different bumps never collide). Depending on what's found, it
+      resumes from the right place instead of failing on "branch
+      already exists" or opening a duplicate PR:
+      - **already merged** — nothing to do (master was already synced
+        in step 1), go straight to tagging;
+      - **open PR exists** — merge that one, don't open a new one;
+      - **branch pushed, no PR** — reuse the branch, open a PR;
+      - **nothing exists** — the full flow from scratch.
+   3. if `package.json` on the branch isn't bumped yet, its
+      `"version"` field is updated (a text-level replace, not
+      `JSON.parse`/`stringify` — formatting and field order are left
+      alone). If the package already has a `CHANGELOG.md`, a draft
+      `## [x.y.z] - YYYY-MM-DD` entry (Keep a Changelog style) is
+      added too, with a `### Changed` section listing commits since
+      the last tag (merge commits filtered out) — a starting draft to
+      review, not a finished changelog. Packages without a
+      `CHANGELOG.md` don't get one created. Both files are committed
+      together;
+   4. `gh pr create` against `master` (if there isn't one already);
+   5. with `--wait-checks`: wait for the PR's CI checks via
+      `gh pr checks --watch` (with a real terminal, live-updating). No
+      checks configured isn't an error — there's just nothing to wait
+      for. Failing checks stop that package's bump with an error and
+      skip the merge;
+   6. `gh pr merge --merge` — through a PR, not a direct push, since
+      these repos require it;
+   7. `git checkout master` → `git fetch origin` →
+      `git merge --ff-only origin/master` — local master is synced to
+      the just-merged PR;
+   8. **git tag** `v<new-version>` (e.g. `v1.2.10`) is created and
+      pushed if it doesn't already exist (idempotent, like everything
+      else here — a re-run won't try to create it twice).
+3. Any failure along the way (fetch/push/PR/CI/merge) marks that
+   package ✗ with a clear message and moves on to the next one in the
+   queue, without aborting the whole run.
+4. **Once every selected package is processed** — a separate check
+   across *all* packages (not just the ones just bumped): does any
+   local package's `dependencies`/`devDependencies`/`peerDependencies`
+   reference another local package with a range that no longer
+   matches (e.g. package A declares `"pkg-b": "^1.2.0"` but the local
+   version of `pkg-b` is `1.1.12`). Nothing is changed automatically —
+   just a warning that it's worth checking and bumping/adjusting that
+   dependency separately.
+
+Publishing to npm and creating a GitHub Release are deliberately
+separate steps — see `vpc publish` and `vpc release` below. Bumping a
+batch of packages and then publishing or releasing only some of them
+are different decisions that don't always happen at the same time.
+
+**Options:**
+
+| Flag | What it does |
+| --- | --- |
+| `--dry-run` | Prints the plan for each package, changes and pushes nothing — including the `CHANGELOG.md` entry, CI wait, and git tag. |
+| `--packages <a,b,c>` | Comma-separated package dir names instead of the interactive checkbox — for scripts. Unknown names are printed as a warning and skipped. |
+| `--yes` | Skip the "proceed?" confirmation. |
+| `--wait-checks` | Wait for the PR's CI checks (if any are configured) before merging; don't merge if they fail. |
+
+```bash
+# dry run first — nothing is pushed, committed, merged, or tagged,
+# it just shows what would happen
+vpc bump --dry-run
+
+# normal interactive run
+vpc bump
+
+# wait for CI before merging
+vpc bump --wait-checks
+
+# fully non-interactive, for a script/CI
+vpc bump --packages vue-toast-kit,os-detect --yes
+```
+
+### `vpc publish [options]`
+
+1. Checks each package's registry version (`npm view <pkg> version`)
+   against its local `package.json` version — in parallel, printing
+   each result as it arrives (so the order reflects registry response
+   time, not the package list order).
+2. Shows a checkbox: registry version → local version. Packages where
+   they differ (genuinely unpublished) are pre-selected; already
+   published ones are unchecked but still selectable (e.g. to
+   republish after an unpublish).
+3. After confirming, for each selected package, one at a time:
+   `npm publish` (or `npm publish --dry-run` with the `--dry-run`
+   flag — npm's own dry run, including the real build and pack step,
+   not just printing a plan). Runs with a real terminal, not captured
+   — an npm 2FA/OTP prompt works normally.
+
+**Options:**
+
+| Flag | What it does |
+| --- | --- |
+| `--dry-run` | `npm publish --dry-run` instead of a real publish. |
+| `--packages <a,b,c>` | Package list instead of the interactive checkbox. |
+| `--yes` | Skip the "proceed?" confirmation. |
+
+```bash
+# see what's unpublished, then publish what you pick
+vpc publish
+
+# same, but nothing is actually published — just build and pack
+vpc publish --dry-run
+
+# specific packages, no prompts
+vpc publish --packages vue-toast-kit,os-detect --yes
+```
+
+### `vpc tag [options]`
+
+For a package whose version was already bumped some other way (not
+through `vpc bump`, or before it started tagging), `vpc release` has
+nothing to work with — there's no tag for the current version yet.
+`vpc tag` puts the missing tag on the current version without bumping
+it again or opening a PR:
+
+1. Checks each package (in parallel) for whether a tag
+   `v<local version>` already exists — printing progress per package.
+2. Shows a checkbox: package, version, tag. Untagged packages are
+   pre-selected; already-tagged ones can still be picked manually
+   (harmless — it just confirms the tag is there).
+3. After confirming, for each selected package, one at a time:
+   `git fetch`/`checkout master`/`merge --ff-only` (tags an up-to-date
+   master, same as `bump`), then creates and pushes the tag if it's
+   missing.
+4. If at least one package was actually tagged (and it wasn't a
+   `--dry-run`), it asks: "Create a GitHub Release for the N
+   package(s) just tagged?" — answering yes runs the same process as
+   `vpc release` for exactly those packages (notes from `CHANGELOG.md`
+   when available, otherwise `--generate-notes`).
+
+**Options:**
+
+| Flag | What it does |
+| --- | --- |
+| `--dry-run` | Prints the plan; tags, pushes, and releases nothing. |
+| `--packages <a,b,c>` | Package list instead of the interactive checkbox. |
+| `--yes` | Skip the "proceed?" confirmation (the release question is skipped too — no release is created unless `--release` is also given). |
+| `--release` | Create a release right after tagging, without asking — for scripts. |
+
+```bash
+# see what needs tagging, tag it, get offered a release
+vpc tag
+
+# fully non-interactive: tag and release
+vpc tag --packages vue-toast-kit,os-detect --yes --release
+```
+
+### `vpc release [options]`
+
+1. Checks each package (in parallel) for a `v<local version>` tag on
+   origin (the one `bump` or `tag` creates) and whether that tag
+   already has a GitHub Release — printing progress per package.
+2. Shows a checkbox: package and its tag. Packages with no tag for
+   their current version are shown disabled ("no tag yet — run
+   `vpc bump` first") — they can't be selected until tagged. Already
+   released ones are shown as "(already released)" — selectable but
+   not required.
+3. After confirming, for each selected package, one at a time:
+   `gh release create <tag> --verify-tag --title "<pkg>@<version>"`.
+   `--verify-tag` guarantees this never invents a new tag — only ever
+   uses one that already exists. Release notes come from the matching
+   `CHANGELOG.md` section when there is one, otherwise
+   `--generate-notes` (gh's own summary of merged PRs/commits).
+
+**Options:**
+
+| Flag | What it does |
+| --- | --- |
+| `--dry-run` | Prints what would be created; publishes nothing. |
+| `--packages <a,b,c>` | Package list instead of the interactive checkbox. |
+| `--yes` | Skip the "proceed?" confirmation. |
+
+```bash
+# see what's tagged but not released, then release it
+vpc release
+
+# specific packages, no prompts
+vpc release --packages vue-toast-kit,os-detect --yes
+```
+
+## Example output
+
+```
+[1/1] vue-toast-kit  1.0.7 → 1.0.8
+
+  $ git fetch origin
+  $ git checkout master
+  $ git merge --ff-only origin/master
+  ✓ master is up to date.
+  ✓ Created branch 1.0.8-version-bump.
+  ✓ Drafted a CHANGELOG.md entry — review it before merging if you want it polished.
+  $ git commit -m chore: bump version to 1.0.8
+  ✓ package.json version set to 1.0.8 and committed.
+  $ git push -u origin 1.0.8-version-bump
+  ✓ Branch pushed (or already up to date on origin).
+  $ gh pr create --base master --head 1.0.8-version-bump ...
+  ✓ Opened PR #12.
+  $ gh pr merge 12 --merge --delete-branch=false
+  ✓ Merged PR #12.
+  ✓ Local master synced to origin at 1.0.8.
+  $ git tag -a v1.0.8 -m v1.0.8
+  $ git push origin v1.0.8
+  ✓ Tagged and pushed v1.0.8.
+```
+
+Re-running `vpc bump` on the same package (say, a previous run was
+interrupted at the CI or network step) is shorter — anything already
+done is just confirmed, not redone:
+
+```
+[1/1] vue-toast-kit  1.0.7 → 1.0.8
+
+  ✓ master is up to date.
+  ✓ Already merged as PR #12 — master already has it.
+  ✓ Tag v1.0.8 already exists on origin.
+```
+
+`vpc publish` on its own:
+
+```
+Checking 2 package(s) against the registry...
+  vue-toast-kit: registry 1.0.7 ≠ local 1.0.8
+  os-detect: registry 2.1.5 = local 2.1.5
+
+? Pick packages to publish:
+    vue-toast-kit  1.0.7 → 1.0.8
+
+[1/1] vue-toast-kit@1.0.8
+  $ npm publish
+  ✓ Published vue-toast-kit@1.0.8.
+```
+
+`vpc release` on its own:
+
+```
+Checking 2 package(s) for a tag and an existing release...
+  vue-toast-kit: v1.0.8 — ready
+  os-detect: v2.1.5 — already released
+
+? Pick packages to create a GitHub Release for:
+    vue-toast-kit  v1.0.8
+
+[1/1] vue-toast-kit  v1.0.8
+  ✓ Using the matching CHANGELOG.md section as release notes.
+  $ gh release create v1.0.8 --verify-tag --title vue-toast-kit@1.0.8 --notes-file ...
+  ✓ Created release vue-toast-kit@1.0.8.
+```
+
+## Configuration
+
+The list of directories to scan lives in `vpc.config.json` (next to
+this project's own `package.json`) — edit it through `vpc setup`
+(recommended) or by hand. Two independent arrays:
+
+- `roots` — directories whose **subfolders** are scanned: each
+  subfolder containing both `package.json` and `.git` counts as a
+  package. Convenient when all your packages live next to each other
+  in one shared folder.
+- `packages` — directories that are themselves a package (not their
+  subfolders) — for a single repo that doesn't live next to the rest.
+
+Both arrays are optional and additive; you can list several `roots`
+and any number of `packages`. A package found through both `roots` and
+`packages` (e.g. a path that happens to overlap) is only counted once.
+Relative paths in the config are resolved against the config file's
+own location, not the current working directory. With no config file
+at all, the CLI finds nothing and tells you to run `vpc setup` — there
+is no built-in default path.
+
+```json
+{
+  "roots": ["/path/to/folder-of-repos"],
+  "packages": ["/path/to/a-single-repo"]
+}
+```
+
+A ready-to-copy template is at `vpc.config.example.json` in the
+project root — copy it to `vpc.config.json` and edit by hand, or fill
+it in through `vpc setup`.
+
+If a directory in `roots`/`packages` doesn't exist, or (for
+`packages`) doesn't contain `package.json`/`.git`, the CLI prints a
+warning and skips it without stopping the rest of the run.
+
+A different config file can be pointed to with `--config` (works
+before or after the subcommand) or the `VPC_CONFIG` environment
+variable:
+
+```bash
+vpc --config "/path/to/vpc.config.json" list
+vpc list --config "/path/to/vpc.config.json"
+```
+
+For a one-off override without editing the file, `VPC_ROOT` replaces
+the configured `roots` entirely (`packages` is left as-is):
+
+```bash
+VPC_ROOT="/other/path" vpc list
+```
+
+## Development
+
+```bash
+npm test
+```
+
+Unit tests cover the pure logic that doesn't need a real
+`git`/`gh`/`npm` — version bumping, `CHANGELOG.md` entry insertion,
+and cross-package dependency drift detection — using real temporary
+files on disk rather than mocks.
+
+## Author
+
+Built by [VueCraft](https://vuecraft.ru/en/).
+
+## License
+
+MIT — see [LICENSE](./LICENSE).

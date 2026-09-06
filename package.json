@@ -1,0 +1,38 @@
+{
+  "name": "polyrepo-cli",
+  "version": "1.0.0",
+  "description": "Interactive CLI for managing a folder of local npm package repos: version bumps through a PR, npm publish, GitHub releases, and cross-package dependency drift checks — all from one tool.",
+  "type": "module",
+  "bin": {
+    "vpc": "./src/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "keywords": [
+    "cli",
+    "polyrepo",
+    "monorepo",
+    "multi-repo",
+    "npm",
+    "release",
+    "version-bump",
+    "github-release",
+    "changelog"
+  ],
+  "author": "macrulez <macrulezru@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/macrulezru/polyrepo-cli.git"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^7.2.1",
+    "commander": "^12.1.0",
+    "picocolors": "^1.1.1",
+    "semver": "^7.8.5"
+  }
+}
