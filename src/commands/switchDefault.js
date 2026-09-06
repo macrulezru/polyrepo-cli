@@ -2,12 +2,12 @@ import { confirm } from '@inquirer/prompts'
 import pc from 'picocolors'
 import { discoverRepos, inspectRepos } from '../repos.js'
 import { loadConfig } from '../loadConfig.js'
-import { syncMaster } from '../masterSync.js'
+import { syncDefaultBranch } from '../defaultBranchSync.js'
 import { selectPackages } from '../selectPackages.js'
 import { heading, stepHeading, ok, fail, warn, columnWidths, formatRow } from '../ui.js'
 import { startSpinner } from '../spinner.js'
 
-export async function switchMasterCommand({ configPath, packages, yes = false, force = false } = {}) {
+export async function switchDefaultCommand({ configPath, packages, yes = false, force = false, clean = false } = {}) {
   const config = loadConfig({ configPath })
   const discovered = discoverRepos(config)
   if (discovered.length === 0) {
@@ -24,7 +24,7 @@ export async function switchMasterCommand({ configPath, packages, yes = false, f
   const selected = await selectPackages({
     items: repos,
     packages,
-    message: "Pick repos to switch to their default branch and update:",
+    message: 'Pick repos to switch to their default branch and update:',
     buildChoice: (all) => {
       const columns = [{ value: (r) => r.dir }]
       const widths = columnWidths(all, columns)
@@ -36,7 +36,7 @@ export async function switchMasterCommand({ configPath, packages, yes = false, f
               r.branch !== r.defaultBranch ? `, default: ${r.defaultBranch}` : ''
             })`,
           ) +
-          (force && !r.clean ? pc.red('  will discard uncommitted changes') : ''),
+          (force && !r.clean ? pc.red(`  will discard uncommitted changes${clean ? ' and untracked files' : ''}`) : ''),
         value: r,
         checked: r.branch !== r.defaultBranch,
       })
@@ -54,7 +54,9 @@ export async function switchMasterCommand({ configPath, packages, yes = false, f
     const proceed = await confirm({
       message:
         force && dirtyCount > 0
-          ? `Switch ${selected.length} repo(s) to their default branch — ${dirtyCount} of them dirty, their uncommitted changes will be permanently discarded. Continue?`
+          ? `Switch ${selected.length} repo(s) to their default branch — ${dirtyCount} of them dirty, their uncommitted changes${
+              clean ? ' and untracked files' : ''
+            } will be permanently discarded. Continue?`
           : `Switch ${selected.length} repo(s) to their default branch and fast-forward?`,
       default: !force,
     })
@@ -74,7 +76,7 @@ export async function switchMasterCommand({ configPath, packages, yes = false, f
       continue
     }
 
-    const result = syncMaster(repo, { force })
+    const result = syncDefaultBranch(repo, { force, clean })
     if (!result.ok) {
       fail(result.message)
       continue
@@ -82,7 +84,7 @@ export async function switchMasterCommand({ configPath, packages, yes = false, f
 
     ok(
       force && !repo.clean
-        ? `Discarded local changes — now on ${repo.defaultBranch}, matching origin.`
+        ? `Discarded local changes${clean ? ' and untracked files' : ''} — now on ${repo.defaultBranch}, matching origin.`
         : `Now on ${repo.defaultBranch}, up to date with origin.`,
     )
   }

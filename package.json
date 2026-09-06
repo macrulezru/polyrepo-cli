@@ -1,6 +1,6 @@
 {
   "name": "polyrepo-cli",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Interactive CLI for managing a folder of local npm package repos: version bumps through a PR, npm publish, GitHub releases, and cross-package dependency drift checks — all from one tool.",
   "type": "module",
   "bin": {

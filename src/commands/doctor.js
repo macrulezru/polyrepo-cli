@@ -151,7 +151,7 @@ async function checkRemoteSync(repos) {
 }
 
 // Whether each repo's local default branch actually matches origin —
-// surfaced here proactively so it's known before a `switch-master` run
+// surfaced here proactively so it's known before a `switch-default` run
 // fails partway on a fast-forward it can't do, or before `bump`/`tag`
 // build a branch from a base that isn't what it looks like locally.
 async function checkBranchSync(repos) {
@@ -186,7 +186,7 @@ async function checkBranchSync(repos) {
   }
   if (behindOnly.length > 0) {
     warn(
-      `${behindOnly.length} repo(s) are behind origin (safe to fast-forward with \`polyrepo switch-master\`): ${behindOnly
+      `${behindOnly.length} repo(s) are behind origin (safe to fast-forward with \`polyrepo switch-default\`): ${behindOnly
         .map((r) => r.repo.dir)
         .join(', ')}`,
     )
