@@ -9,22 +9,30 @@ with `--dry-run` before anything actually changes.
 
 - **`setup`** — add, edit, or remove the package directories the CLI
   scans, right from the terminal — no hand-editing JSON.
+- **`clone`** — diff a GitHub org/user's repo list against what's
+  already cloned under a root, and clone whatever's missing.
 - **`list`** — one table per package: version, branch, git status, git
   tag, GitHub Release, npm registry status, and cross-package
   dependency drift. `list --quick` skips the network checks for an
   instant version/branch/git-only view.
+- **`outdated`** — one table across every package of what's outdated
+  (`npm outdated`), instead of running it in each repo by hand.
+- **`prs`** — one table of every open pull request across every
+  package (`gh pr list`) — useful after an interrupted `bump` run to
+  see what's still waiting to be merged.
 - **`doctor`** — a one-command health check: is the environment set up
   correctly (Node/git/gh/npm, authentication), and does any local
   package still depend on an incompatible version of another local
   package.
 - **`switch-master`** — fast-forward selected repos to an up-to-date
   `master`.
-- **`bump`** — bump a package's patch version through a branch → PR →
-  merge, then tag the release. Safe to re-run if a previous attempt
-  was interrupted partway — it picks up from wherever it left off
-  instead of failing or duplicating work. Can wait for CI checks
-  before merging (`--wait-checks`), and drafts a `CHANGELOG.md` entry
-  when the package already has one.
+- **`bump`** — bump a package's version (patch by default, or
+  `--minor`/`--major`) through a branch → PR → merge, then tag the
+  release. Safe to re-run if a previous attempt was interrupted
+  partway — it picks up from wherever it left off instead of failing
+  or duplicating work. Can wait for CI checks before merging
+  (`--wait-checks`), and drafts a `CHANGELOG.md` entry when the
+  package already has one.
 - **`publish`** — run `npm publish` for the packages that are actually
   ahead of the registry, after comparing each one automatically.
 - **`tag`** — tag a package at its *current* version without bumping
@@ -32,6 +40,9 @@ with `--dry-run` before anything actually changes.
   way. Offers to create a GitHub Release right after.
 - **`release`** — create a GitHub Release from a tag, with notes
   pulled from the matching `CHANGELOG.md` section when there is one.
+- **`exec`** — run any command (`npm test`, `npm outdated`, a lint
+  script, anything) across every selected package, one at a time, with
+  a real terminal.
 - Every command that touches multiple repos supports `--packages` and
   `--yes` for fully non-interactive use in scripts.
 
@@ -118,6 +129,44 @@ polyrepo setup
 polyrepo setup --config "/path/to/polyrepo.config.json"
 ```
 
+### `polyrepo clone`
+
+Diffs a GitHub org/user's repo list against what's already cloned
+under a root, and clones whatever's missing:
+
+1. `gh repo list <org>` — every repo under that org/user (archived
+   ones are skipped by default, `--include-archived` to include them).
+2. Compares the names against the directories already found under the
+   target root (`--root`, or the first root in your config if not
+   given).
+3. Shows a checkbox of the missing ones (all checked by default), then
+   `git clone`s each selected one into the target root, one at a time.
+
+`--org` is required and isn't stored in the config — the config's
+`roots`/`packages` describe *where local repos live*, not which
+GitHub account they came from. Cloning into a root that isn't in the
+config yet still works — you'll just be reminded to run
+`polyrepo setup` afterward so `list`/`doctor`/etc. pick the new repos
+up too.
+
+**Options:**
+
+| Flag | What it does |
+| --- | --- |
+| `--org <name>` | GitHub org or user to list repos from (required). |
+| `--root <path>` | Root directory to clone into. Defaults to the config's first `roots` entry. |
+| `--include-archived` | Also offer archived repos. |
+| `--packages <a,b,c>` | Only offer these repo names instead of the interactive checkbox. |
+| `--yes` | Skip the "proceed?" confirmation. |
+| `--dry-run` | Print what would be cloned; clone nothing. |
+
+```bash
+polyrepo clone --org my-github-org
+
+# a specific root, no prompts
+polyrepo clone --org my-github-org --root "C:\work\NPM" --yes
+```
+
 ### `polyrepo list` (alias `ls`)
 
 A table of every discovered package. Full summary by default:
@@ -142,6 +191,34 @@ polyrepo list
 
 # version/branch/git only — no network calls
 polyrepo list --quick
+```
+
+### `polyrepo outdated`
+
+Read-only. Runs `npm outdated --json` for every package in parallel
+and prints one flat table (Package, Dependency, Current, Wanted,
+Latest) instead of running it in each repo by hand. Packages with
+nothing outdated just don't add any rows.
+
+```bash
+polyrepo outdated
+
+# only these packages
+polyrepo outdated --packages vue-toast-kit,os-detect
+```
+
+### `polyrepo prs`
+
+Read-only. Runs `gh pr list` for every package in parallel and prints
+one flat table (Package, PR, Title, Branch, Status). Useful after an
+interrupted `polyrepo bump` run, to see at a glance which packages
+still have a PR open that needs merging by hand.
+
+```bash
+polyrepo prs
+
+# only these packages
+polyrepo prs --packages vue-toast-kit,os-detect
 ```
 
 ### `polyrepo doctor`
@@ -187,7 +264,9 @@ polyrepo switch-master --packages vue-toast-kit,os-detect --yes
 ### `polyrepo bump [options]`
 
 1. Shows a checkbox of packages with their current version and the
-   version they'd bump to (`1.2.9 → 1.2.10`, always a patch). Packages
+   version they'd bump to (`1.2.9 → 1.2.10` for a patch bump, the
+   default — `--minor`/`--major` bump that part instead, resetting
+   the parts below it to `0`, same as any semver tool). Packages
    with a dirty working tree are marked — they'll be skipped. The
    highlighted package's description shows what's actually changed
    since the last git tag (`git log <tag>..master`) — if that's empty,
@@ -257,6 +336,8 @@ are different decisions that don't always happen at the same time.
 | Flag | What it does |
 | --- | --- |
 | `--dry-run` | Prints the plan for each package, changes and pushes nothing — including the `CHANGELOG.md` entry, CI wait, and git tag. |
+| `--minor` | Bump the minor version instead of patch (e.g. `1.2.9 → 1.3.0`). |
+| `--major` | Bump the major version instead of patch (e.g. `1.2.9 → 2.0.0`). |
 | `--packages <a,b,c>` | Comma-separated package dir names instead of the interactive checkbox — for scripts. Unknown names are printed as a warning and skipped. |
 | `--yes` | Skip the "proceed?" confirmation. |
 | `--wait-checks` | Wait for the PR's CI checks (if any are configured) before merging; don't merge if they fail. |
@@ -266,8 +347,11 @@ are different decisions that don't always happen at the same time.
 # it just shows what would happen
 polyrepo bump --dry-run
 
-# normal interactive run
+# normal interactive run (patch bump)
 polyrepo bump
+
+# minor bump instead
+polyrepo bump --minor
 
 # wait for CI before merging
 polyrepo bump --wait-checks
@@ -382,6 +466,40 @@ polyrepo release
 
 # specific packages, no prompts
 polyrepo release --packages vue-toast-kit,os-detect --yes
+```
+
+### `polyrepo exec -- <command...>`
+
+Runs any command in each selected package, one at a time, with a real
+terminal (its output, colors, and any prompts show up normally —
+useful for things like `npm test` that might want a TTY). Shows a
+checkbox of every discovered package first (all checked by default —
+"run everywhere" is the common case).
+
+The command itself must come after a literal `--`, same as
+`npm run <script> --` — anything before it is parsed as `polyrepo`'s
+own options. A package that exits non-zero is reported and, by
+default, the run continues through the rest; `--bail` stops
+immediately instead. A summary of failed packages (if any) prints at
+the end, and the process exits non-zero if anything failed.
+
+**Options:**
+
+| Flag | What it does |
+| --- | --- |
+| `--packages <a,b,c>` | Package list instead of the interactive checkbox. |
+| `--yes` | Skip the "proceed?" confirmation. |
+| `--bail` | Stop at the first package that exits non-zero. |
+
+```bash
+# run tests everywhere
+polyrepo exec -- npm test
+
+# specific packages, no prompts
+polyrepo exec --packages vue-toast-kit,os-detect --yes -- npm outdated
+
+# stop at the first failure
+polyrepo exec --bail -- npm run lint
 ```
 
 ## Example output

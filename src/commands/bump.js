@@ -4,7 +4,7 @@ import pc from 'picocolors'
 import { discoverRepos, inspectRepos, readPackageJson } from '../repos.js'
 import { MASTER_BRANCH, bumpBranchName } from '../config.js'
 import { loadConfig } from '../loadConfig.js'
-import { bumpPatch, replaceVersionInText } from '../version.js'
+import { bumpVersion, replaceVersionInText } from '../version.js'
 import { git } from '../exec.js'
 import { syncMaster } from '../masterSync.js'
 import { detectBumpState, createPr, mergePr } from '../github.js'
@@ -23,6 +23,7 @@ export async function bumpCommand({
   packages, // string[] of dir names — skips the checkbox when given
   yes = false, // skip the "proceed?" confirmation
   waitChecks = false, // wait for CI checks (if any) before merging each PR
+  bumpType = 'patch', // 'patch' | 'minor' | 'major'
 } = {}) {
   const config = loadConfig({ configPath })
   const discovered = discoverRepos(config)
@@ -31,7 +32,7 @@ export async function bumpCommand({
     return
   }
 
-  heading('Bump version')
+  heading(`Bump version (${bumpType})`)
 
   const scanSpinner = startSpinner(`Checking ${discovered.length} package(s)...`)
   const allRepos = await inspectRepos(discovered)
@@ -43,7 +44,7 @@ export async function bumpCommand({
     return
   }
 
-  const withTarget = repos.map((r) => ({ ...r, newVersion: bumpPatch(r.version) }))
+  const withTarget = repos.map((r) => ({ ...r, newVersion: bumpVersion(r.version, bumpType) }))
 
   // Only worth computing when the checkbox is actually going to be shown —
   // a --packages run never displays it, so skip the (parallel, but still
@@ -59,7 +60,7 @@ export async function bumpCommand({
   const selected = await selectPackages({
     items: withPreview,
     packages,
-    message: 'Pick packages to bump (patch):',
+    message: `Pick packages to bump (${bumpType}):`,
     buildChoice: (all) => {
       const columns = [
         { value: (r) => r.dir },

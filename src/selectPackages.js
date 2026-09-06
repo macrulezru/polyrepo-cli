@@ -1,6 +1,7 @@
 import { checkbox } from '@inquirer/prompts'
 import pc from 'picocolors'
 import { promptTheme } from './ui.js'
+import { filterByNames } from './filterByNames.js'
 
 // Shared "pick some packages" step used by both `bump` and `publish`:
 // either takes an explicit --packages list (skips the prompt entirely,
@@ -10,13 +11,7 @@ import { promptTheme } from './ui.js'
 // per-item `(item) => choice` function.
 export async function selectPackages({ items, packages, message, buildChoice, pageSize = 20 }) {
   if (packages) {
-    const wanted = new Set(packages.map((p) => p.trim().toLowerCase()).filter(Boolean))
-    const selected = items.filter((r) => wanted.has(r.dir.toLowerCase()))
-    const found = new Set(selected.map((r) => r.dir.toLowerCase()))
-    for (const name of wanted) {
-      if (!found.has(name)) console.log(pc.yellow(`Unknown package, ignoring: ${name}`))
-    }
-    return selected
+    return filterByNames(items, packages)
   }
 
   const makeChoice = buildChoice(items)
