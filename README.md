@@ -414,11 +414,16 @@ polyrepo bump --packages vue-toast-kit,os-detect --yes
    they differ (genuinely unpublished) are pre-selected; already
    published ones are unchecked but still selectable (e.g. to
    republish after an unpublish).
-3. After confirming, for each selected package, one at a time:
-   `npm publish` (or `npm publish --dry-run` with the `--dry-run`
-   flag — npm's own dry run, including the real build and pack step,
-   not just printing a plan). Runs with a real terminal, not captured
-   — an npm 2FA/OTP prompt works normally.
+3. After confirming, checks `npm whoami` once for the whole batch
+   (skipped under `--dry-run`) — not logged in runs `npm login`
+   (a real terminal, so its browser-based OTP flow or credential
+   prompt works normally) before publishing anything, instead of
+   only finding out partway through the first package's `npm publish`.
+4. For each selected package, one at a time: `npm publish` (or
+   `npm publish --dry-run` with the `--dry-run` flag — npm's own dry
+   run, including the real build and pack step, not just printing a
+   plan). Runs with a real terminal, not captured — an npm 2FA/OTP
+   prompt works normally.
 
 **Options:**
 
