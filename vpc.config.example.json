@@ -1,0 +1,4 @@
+{
+  "roots": ["/path/to/folder-of-repos"],
+  "packages": ["/path/to/a-single-repo"]
+}
