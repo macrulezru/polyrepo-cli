@@ -23,7 +23,11 @@
     "github-release",
     "changelog"
   ],
-  "author": "macrulez <macrulezru@gmail.com>",
+  "author": {
+    "name": "Danil Lisin Vladimirovich (Macrulez)",
+    "email": "macrulezru@gmail.com",
+    "url": "https://macrulez.ru/en"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
