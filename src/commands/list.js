@@ -8,6 +8,7 @@ import { fetchPublishedVersionAsync } from '../registry.js'
 import { findStaleLocalDeps } from '../crossDeps.js'
 import { pMap } from '../pMap.js'
 import { printTable, heading } from '../ui.js'
+import { startSpinner } from '../spinner.js'
 
 export async function listCommand({ configPath, quick = false } = {}) {
   const config = loadConfig({ configPath })
@@ -19,7 +20,9 @@ export async function listCommand({ configPath, quick = false } = {}) {
 
   heading(`Packages (${repos.length})`)
 
+  const gitSpinner = startSpinner(`Checking ${repos.length} package(s) — version, branch, git status...`)
   const rows = await inspectRepos(repos)
+  gitSpinner.stop()
 
   const columns = [
     { label: 'Package', value: (r) => r.dir },
@@ -37,7 +40,6 @@ export async function listCommand({ configPath, quick = false } = {}) {
   ]
 
   if (!quick) {
-    console.log(pc.dim(`Checking ${rows.length} package(s) for tags, releases, and the registry...`))
     // Cross-package dependency drift is cheap (no network — just the
     // package.jsons already on disk) and doesn't vary per package the way
     // tag/release/npm do, so it's computed once for everyone rather than
@@ -47,12 +49,14 @@ export async function listCommand({ configPath, quick = false } = {}) {
       staleByRepo.set(issue.repo.dir, (staleByRepo.get(issue.repo.dir) ?? 0) + 1)
     }
 
+    const registrySpinner = startSpinner(`Checking ${rows.length} package(s) for tags, releases, and the registry...`)
     const withReleaseInfo = await pMap(rows, async (r) => {
       const tag = tagName(r.version)
       const [tagged, published] = await Promise.all([tagExistsAsync(r, tag), fetchPublishedVersionAsync(r)])
       const released = tagged ? await releaseExistsAsync(r, tag) : false
       return { ...r, tag, tagged, released, published, staleDeps: staleByRepo.get(r.dir) ?? 0 }
     })
+    registrySpinner.stop()
 
     columns.push(
       {

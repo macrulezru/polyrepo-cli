@@ -4,6 +4,7 @@ import { loadConfig } from '../loadConfig.js'
 import { run } from '../exec.js'
 import { findStaleLocalDeps } from '../crossDeps.js'
 import { heading, ok, fail, warn } from '../ui.js'
+import { startSpinner } from '../spinner.js'
 
 export async function doctorCommand({ configPath } = {}) {
   heading('Environment')
@@ -15,7 +16,10 @@ export async function doctorCommand({ configPath } = {}) {
   heading('Config')
   const config = loadConfig({ configPath })
   console.log(pc.dim(`Config file: ${config.configPath}`))
-  const repos = await inspectRepos(discoverRepos(config))
+  const discovered = discoverRepos(config)
+  const spinner = startSpinner(`Checking ${discovered.length} package(s)...`)
+  const repos = await inspectRepos(discovered)
+  spinner.stop()
   if (repos.length === 0) {
     fail('No packages discovered — check `polyrepo setup`.')
   } else {

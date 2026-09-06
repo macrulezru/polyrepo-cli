@@ -15,6 +15,7 @@ import { waitForChecks } from '../ciChecks.js'
 import { findStaleLocalDeps } from '../crossDeps.js'
 import { heading, stepHeading, ok, fail, warn, columnWidths, formatRow } from '../ui.js'
 import { selectPackages } from '../selectPackages.js'
+import { startSpinner } from '../spinner.js'
 
 export async function bumpCommand({
   dryRun = false,
@@ -24,7 +25,18 @@ export async function bumpCommand({
   waitChecks = false, // wait for CI checks (if any) before merging each PR
 } = {}) {
   const config = loadConfig({ configPath })
-  const allRepos = await inspectRepos(discoverRepos(config))
+  const discovered = discoverRepos(config)
+  if (discovered.length === 0) {
+    console.log(pc.yellow('No repos found.'))
+    return
+  }
+
+  heading('Bump version')
+
+  const scanSpinner = startSpinner(`Checking ${discovered.length} package(s)...`)
+  const allRepos = await inspectRepos(discovered)
+  scanSpinner.stop()
+
   const repos = allRepos.filter((r) => r.version)
   if (repos.length === 0) {
     console.log(pc.yellow('No repos found.'))
@@ -33,14 +45,14 @@ export async function bumpCommand({
 
   const withTarget = repos.map((r) => ({ ...r, newVersion: bumpPatch(r.version) }))
 
-  heading('Bump version')
-
   // Only worth computing when the checkbox is actually going to be shown —
   // a --packages run never displays it, so skip the (parallel, but still
   // real) work of asking every repo for its git log.
   let withPreview = withTarget
   if (!packages) {
+    const previewSpinner = startSpinner(`Checking what changed since the last tag for ${withTarget.length} package(s)...`)
     const changesList = await describeRecentChangesForAll(withTarget)
+    previewSpinner.stop()
     withPreview = withTarget.map((r, i) => ({ ...r, changes: changesList[i] }))
   }
 
