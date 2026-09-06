@@ -23,12 +23,16 @@ with `--dry-run` before anything actually changes.
 - **`prs`** — one table of every open pull request across every
   package (`gh pr list`) — useful after an interrupted `bump` run to
   see what's still waiting to be merged.
-- **`doctor`** — a one-command health check: is the environment set up
-  correctly (Node/git/gh/npm, authentication), and does any local
-  package still depend on an incompatible version of another local
-  package.
-- **`switch-master`** — fast-forward selected repos to an up-to-date
-  `master`.
+- **`doctor`** — a one-command health check: environment (Node/git/gh/npm,
+  authentication), branch health (default-branch name drift, stale
+  remote-tracking refs, divergence from origin, detached `HEAD`,
+  missing branch protection, leftover `bump` branches — with a few
+  safe, non-destructive self-repairs along the way, and
+  `--clean-branches` for an interactive local-branch cleanup), and
+  cross-package dependency drift.
+- **`switch-master`** — fast-forward selected repos to their up-to-date
+  default branch, whatever it's actually named (`master`, `main`, or
+  anything else — detected per repo, not assumed).
 - **`bump`** — bump a package's version (patch by default, or
   `--minor`/`--major`) through a branch → PR → merge, then tag the
   release. Safe to re-run if a previous attempt was interrupted
@@ -265,21 +269,77 @@ polyrepo prs
 polyrepo prs --packages vue-toast-kit,os-detect
 ```
 
-### `polyrepo doctor`
+### `polyrepo doctor [options]`
 
-A read-only health check in three sections:
+A health check in seven sections — mostly read-only diagnosis, plus a
+few small, non-destructive self-repairs:
 
 1. **Environment** — Node.js version (20+ required), whether
    `git`/`gh`/`npm` are on `PATH`, and whether `gh`/`npm` are
    authenticated (npm auth is only a warning — it's only needed for
    `publish`).
 2. **Config** — how many packages the current config actually
-   resolves to, and which repos are dirty or off `master`.
-3. **Cross-package dependencies** — the same dependency-drift check
+   resolves to, and which repos are dirty, in a detached `HEAD` state,
+   or off their default branch.
+3. **Remote sync** — two related repairs, both per-repo pointer
+   refreshes that never touch a file, branch, or commit:
+   - compares each repo's locally cached default-branch name (the
+     same value `switch-master`/`bump`/`tag` all use — see
+     `switch-master` above) against what GitHub actually reports
+     right now. Git never refreshes that local cache on its own, so
+     renaming a repo's default branch on GitHub after it was cloned
+     would otherwise go unnoticed by every other command forever —
+     wherever it's drifted, this fixes it with `git remote set-head
+     origin --auto`;
+   - runs `git remote prune origin` on every repo, dropping local
+     `remotes/origin/x` refs left over for branches already deleted
+     on GitHub (these tend to accumulate — every PR branch a `bump`
+     or manual workflow ever created and later got deleted on GitHub
+     leaves one behind locally until pruned).
+
+   Both are skipped for a repo GitHub can't be reached for (offline,
+   or `gh` not authenticated).
+4. **Branch sync** — fetches and compares each repo's local default
+   branch against `origin/<default>`: **diverged** (both ahead and
+   behind — a fast-forward won't work, needs resolving by hand),
+   **behind only** (safe to fast-forward with `switch-master`), or
+   **ahead only** (local commits not yet pushed). Surfaces this
+   before some other command trips over it mid-run instead of after.
+5. **Branch protection** — whether each repo's default branch
+   actually has GitHub branch protection enabled right now.
+   Report-only; enabling protection is a policy decision, not
+   something this fixes on your behalf.
+6. **Stale bump branches** — `bump` merges through a PR with the
+   branch intentionally left on origin (`--delete-branch=false`, see
+   `bump` above), so every completed bump leaves a local branch copy
+   behind too, forever. This reports how many local branches match
+   `<version>-version-bump` **and** already have a merged PR.
+   `--clean-branches` turns that into a checkbox — pick which ones to
+   delete locally (`git branch -d`, which refuses instead of forcing
+   if a branch somehow isn't actually fully merged locally; the
+   branch on origin is never touched, deleting that is out of scope
+   here — it's more sensitive shared state).
+7. **Cross-package dependencies** — the same dependency-drift check
    that runs at the end of `bump`, available on demand without
    bumping anything.
 
-Worth running first if any other command is behaving unexpectedly.
+Worth running first if any other command is behaving unexpectedly, any
+time you rename a default branch on GitHub, or just periodically to
+catch accumulated cruft (stale remote-tracking refs, leftover bump
+branches) before it piles up.
+
+**Options:**
+
+| Flag | What it does |
+| --- | --- |
+| `--clean-branches` | After scanning, show a checkbox of local bump branches whose PR is already merged; delete the ones you pick. |
+
+```bash
+polyrepo doctor
+
+# also review and clean up leftover local bump branches
+polyrepo doctor --clean-branches
+```
 
 ```bash
 polyrepo doctor
@@ -287,22 +347,55 @@ polyrepo doctor
 
 ### `polyrepo switch-master` (alias `sm`)
 
-1. Shows a checkbox list of every repo with its current branch; repos
-   not currently on `master` are pre-selected.
+Each repo's **default branch is detected per repo**, not assumed —
+GitHub itself defaults a new repo to `main`, and plenty of people
+rename it (`master` included), so a mixed folder of repos can easily
+have some on `master` and some on `main`. Detection prefers the
+locally cached `origin/HEAD` ref (no network — set by `git clone`),
+falls back to asking origin directly (`git ls-remote --symref`,
+read-only), then to whichever of `master`/`main` exists as a local
+branch, and finally to `main` (GitHub's own default) if nothing else
+could tell it.
+
+1. Shows a checkbox list of every repo with its current branch (and
+   its default branch, when the two differ); repos not currently on
+   their default branch are pre-selected.
 2. After confirming, for each selected repo, one at a time (each
    step's result prints immediately, not after the whole batch):
    - a dirty working tree is skipped with a warning, untouched;
-   - otherwise: `git fetch origin` → `git checkout master` →
-     `git merge --ff-only origin/master`.
-3. If local `master` has diverged from `origin/master` (fast-forward
+   - otherwise: `git fetch origin` → `git checkout <default branch>` →
+     `git merge --ff-only origin/<default branch>`.
+3. If the local default branch has diverged from origin (fast-forward
    isn't possible), that repo is reported and left alone to resolve by
-   hand — no `--force`/`reset --hard` is ever used.
+   hand.
+
+`--force` changes step 2 and 3 for every selected repo: a dirty
+working tree is no longer skipped, and each repo gets
+`git checkout -f <default branch>` + `git reset --hard
+origin/<default branch>` instead of the safe fast-forward-only merge —
+uncommitted changes to tracked files and any local-only commits on
+that branch are permanently discarded (untracked files are left
+alone, this isn't `git clean`). The checkbox marks which selected
+repos would lose changes, and the proceed confirmation says how many
+and defaults to "No" instead of "Yes" whenever `--force` would
+actually discard something.
+
+**Options:**
+
+| Flag | What it does |
+| --- | --- |
+| `--packages <a,b,c>` | Package list instead of the interactive checkbox. |
+| `--yes` | Skip the "proceed?" confirmation. |
+| `--force` | Discard uncommitted changes and local-only commits on the default branch, hard-resetting it to origin. |
 
 ```bash
 polyrepo switch-master
 
 # no checkbox, specific repos, no confirmation — for scripts
 polyrepo switch-master --packages vue-toast-kit,os-detect --yes
+
+# discard local changes on a repo you don't need anymore
+polyrepo switch-master --packages vue-toast-kit --force
 ```
 
 ### `polyrepo bump [options]`
@@ -313,15 +406,17 @@ polyrepo switch-master --packages vue-toast-kit,os-detect --yes
    the parts below it to `0`, same as any semver tool). Packages
    with a dirty working tree are marked — they'll be skipped. The
    highlighted package's description shows what's actually changed
-   since the last git tag (`git log <tag>..master`) — if that's empty,
-   there's probably nothing worth bumping. These previews are computed
-   for every package in parallel, not one at a time.
+   since the last git tag (`git log <tag>..<default branch>`) — if
+   that's empty, there's probably nothing worth bumping. These
+   previews are computed for every package in parallel, not one at a
+   time.
 2. After confirming, for each selected package, one at a time, with
    live progress:
-   1. `git fetch origin` → `git checkout master` →
-      `git merge --ff-only origin/master` (the bump branch is always
-      created from an up-to-date master, not whatever branch the repo
-      happened to be on);
+   1. `git fetch origin` → `git checkout <default branch>` →
+      `git merge --ff-only origin/<default branch>` (the bump branch
+      is always created from an up-to-date default branch — detected
+      per repo, see `switch-master` above — not whatever branch the
+      repo happened to be on);
    2. **checks the state of a previous attempt** — is there already a
       merged PR, an open PR, or just a pushed branch named
       `<new-version>-version-bump` (e.g. `1.2.10-version-bump` — the
@@ -329,8 +424,8 @@ polyrepo switch-master --packages vue-toast-kit,os-detect --yes
       different bumps never collide). Depending on what's found, it
       resumes from the right place instead of failing on "branch
       already exists" or opening a duplicate PR:
-      - **already merged** — nothing to do (master was already synced
-        in step 1), go straight to tagging;
+      - **already merged** — nothing to do (the default branch was
+        already synced in step 1), go straight to tagging;
       - **open PR exists** — merge that one, don't open a new one;
       - **branch pushed, no PR** — reuse the branch, open a PR;
       - **nothing exists** — the full flow from scratch.
@@ -344,7 +439,8 @@ polyrepo switch-master --packages vue-toast-kit,os-detect --yes
       review, not a finished changelog. Packages without a
       `CHANGELOG.md` don't get one created. Both files are committed
       together;
-   4. `gh pr create` against `master` (if there isn't one already);
+   4. `gh pr create` against the default branch (if there isn't one
+      already);
    5. with `--wait-checks`: wait for the PR's CI checks via
       `gh pr checks --watch` (with a real terminal, live-updating). No
       checks configured isn't an error — there's just nothing to wait
@@ -352,9 +448,9 @@ polyrepo switch-master --packages vue-toast-kit,os-detect --yes
       skip the merge;
    6. `gh pr merge --merge` — through a PR, not a direct push, since
       these repos require it;
-   7. `git checkout master` → `git fetch origin` →
-      `git merge --ff-only origin/master` — local master is synced to
-      the just-merged PR;
+   7. `git checkout <default branch>` → `git fetch origin` →
+      `git merge --ff-only origin/<default branch>` — local default
+      branch is synced to the just-merged PR;
    8. **git tag** `v<new-version>` (e.g. `v1.2.10`) is created and
       pushed if it doesn't already exist (idempotent, like everything
       else here — a re-run won't try to create it twice).
@@ -458,9 +554,9 @@ it again or opening a PR:
    pre-selected; already-tagged ones can still be picked manually
    (harmless — it just confirms the tag is there).
 3. After confirming, for each selected package, one at a time:
-   `git fetch`/`checkout master`/`merge --ff-only` (tags an up-to-date
-   master, same as `bump`), then creates and pushes the tag if it's
-   missing.
+   `git fetch`/`checkout <default branch>`/`merge --ff-only` (tags an
+   up-to-date default branch, same as `bump`), then creates and pushes
+   the tag if it's missing.
 4. If at least one package was actually tagged (and it wasn't a
    `--dry-run`), it asks: "Create a GitHub Release for the N
    package(s) just tagged?" — answering yes runs the same process as

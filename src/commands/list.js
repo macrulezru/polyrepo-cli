@@ -1,6 +1,5 @@
 import pc from 'picocolors'
 import { discoverRepos, inspectRepos } from '../repos.js'
-import { MASTER_BRANCH } from '../config.js'
 import { loadConfig } from '../loadConfig.js'
 import { tagName, tagExistsAsync } from '../tags.js'
 import { releaseExistsAsync } from '../release.js'
@@ -41,7 +40,7 @@ export async function listCommand({ configPath, quick = false, showPath = false,
     {
       label: 'Branch',
       value: (r) => r.branch ?? '(detached)',
-      style: (r, text) => (r.branch === MASTER_BRANCH ? pc.dim(text) : pc.yellow(text)),
+      style: (r, text) => (r.branch === r.defaultBranch ? pc.dim(text) : pc.yellow(text)),
     },
     {
       label: 'Git',

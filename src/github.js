@@ -19,7 +19,7 @@ function findPr(repo, branch, state) {
 // Figures out where a previous (possibly interrupted) bump attempt for this
 // exact branch left off, so a re-run resumes instead of failing on
 // "branch already exists" or opening a duplicate PR:
-//   - 'merged'   — the PR already landed; only a local master sync is left.
+//   - 'merged'   — the PR already landed; only a local default-branch sync is left.
 //   - 'open'     — a PR exists and just needs merging.
 //   - 'branch'   — the branch was pushed but no PR was ever opened.
 //   - 'fresh'    — nothing exists yet, do the full flow.

@@ -12,11 +12,11 @@ import { releaseOne } from './release.js'
 
 // For packages whose version was bumped outside `polyrepo bump` (or before `bump`
 // started tagging), there's no `v<version>` tag yet — `polyrepo release` refuses
-// to touch those. This puts just the tag on the current version, on
-// master's current tip, without touching the version number or opening a
-// PR — no need to bump again just to get a tag. Offers to release
-// right after, since "I just caught this package's tag up" and "I want a
-// release for it" are almost always the same reason to run this.
+// to touch those. This puts just the tag on the current version, on the
+// default branch's current tip, without touching the version number or
+// opening a PR — no need to bump again just to get a tag. Offers to
+// release right after, since "I just caught this package's tag up" and "I
+// want a release for it" are almost always the same reason to run this.
 export async function tagCommand({ configPath, packages, yes = false, dryRun = false, release = false } = {}) {
   const config = loadConfig({ configPath })
   const allRepos = (await inspectRepos(discoverRepos(config))).filter((r) => r.version)
@@ -93,7 +93,7 @@ export async function tagCommand({ configPath, packages, yes = false, dryRun = f
       fail(syncResult.message)
       continue
     }
-    ok('master is up to date.')
+    ok(`${repo.defaultBranch} is up to date.`)
 
     // Re-checked here (not just trusting the table above) in case it
     // changed between listing and now — same reasoning as bump's
