@@ -188,6 +188,7 @@ program
   .alias('ls')
   .description('Show version, branch, tag, release, npm, and dependency status for every package.')
   .option('--quick', 'Skip the tag/release/npm/dependency checks — just version, branch, and git status.')
+  .option('--path', "Add a Path column showing each package's location on disk.")
   .addHelpText(
     'after',
     `
@@ -199,15 +200,24 @@ many other local packages reference it with a now-stale dependency range
 (see \`polyrepo doctor\`). Everything (git, tag, release, npm) runs in parallel
 across packages, not one at a time — still not instant with the extra
 network checks, so use --quick for just version/branch/git when that's
-all you need.
+all you need. --path adds a Path column right after Package, for when a
+package's directory name alone doesn't tell you where it actually lives
+(e.g. it was found via a --packages entry, not a root).
 
 Examples:
   $ polyrepo list
   $ polyrepo ls
   $ polyrepo list --quick                       Just version/branch/git, no network calls
+  $ polyrepo list --path                        Also show each package's directory
 `,
   )
-  .action((opts) => listCommand({ configPath: program.opts().config, quick: Boolean(opts.quick) }))
+  .action((opts) =>
+    listCommand({
+      configPath: program.opts().config,
+      quick: Boolean(opts.quick),
+      showPath: Boolean(opts.path),
+    }),
+  )
 
 program
   .command('outdated')
