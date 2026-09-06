@@ -16,6 +16,44 @@ function toEntry(dirPath) {
   }
 }
 
+// GitHub itself defaults a new repo to "main", and plenty of people rename
+// it back to "master" (or something else) — there's no one right answer,
+// so this is only the last resort once nothing else could tell us.
+const FALLBACK_DEFAULT_BRANCH = 'main'
+
+async function readCachedOriginHead(repo) {
+  const result = await gitAsync(repo.path, ['symbolic-ref', 'refs/remotes/origin/HEAD'])
+  if (!result.ok || !result.stdout) return null
+  const match = result.stdout.match(/^refs\/remotes\/origin\/(.+)$/)
+  return match ? match[1] : null
+}
+
+// Detected once per repo (cached alongside branch/clean below) rather than
+// assumed — a mixed folder of repos can easily have some on "master" and
+// some on "main". In order:
+//   1. the locally cached origin/HEAD ref — set by `git clone` (or a prior
+//      `git remote set-head`), no network needed, the common case;
+//   2. otherwise ask origin directly, read-only (`git ls-remote --symref`
+//      doesn't write any local ref, unlike `git remote set-head --auto`);
+//   3. offline or no working origin — guess from whichever of
+//      master/main actually exists as a local branch;
+//   4. still nothing to go on — GitHub's own default, "main".
+export async function detectDefaultBranchAsync(repo) {
+  const cached = await readCachedOriginHead(repo)
+  if (cached) return cached
+
+  const remoteHead = await gitAsync(repo.path, ['ls-remote', '--symref', 'origin', 'HEAD'])
+  const remoteMatch = remoteHead.ok && remoteHead.stdout.match(/^ref:\s*refs\/heads\/(\S+)\s+HEAD/m)
+  if (remoteMatch) return remoteMatch[1]
+
+  for (const candidate of ['master', 'main']) {
+    const exists = await gitAsync(repo.path, ['show-ref', '--verify', '--quiet', `refs/heads/${candidate}`])
+    if (exists.ok) return candidate
+  }
+
+  return FALLBACK_DEFAULT_BRANCH
+}
+
 // `config.roots` — folders whose direct subdirectories are packages (the
 // original C:\work\NPM-style layout). `config.packages` — individual
 // package folders given directly, for a one-off repo that doesn't live
@@ -76,18 +114,19 @@ export function readPackageJson(repo) {
 }
 
 // Full snapshot used everywhere a package list is shown: name, version,
-// current branch, and whether the working tree has uncommitted changes.
-// The two git calls per repo run concurrently across repos (see pMap)
-// instead of one repo waiting on the last.
+// current branch, its default branch, and whether the working tree has
+// uncommitted changes. The git calls per repo run concurrently across
+// repos (see pMap) instead of one repo waiting on the last.
 export async function inspectRepoAsync(repo) {
   const pkg = readPackageJson(repo)
-  const [branchResult, statusResult] = await Promise.all([
+  const [branchResult, statusResult, defaultBranch] = await Promise.all([
     gitAsync(repo.path, ['branch', '--show-current']),
     gitAsync(repo.path, ['status', '--porcelain']),
+    detectDefaultBranchAsync(repo),
   ])
   const branch = branchResult.ok ? branchResult.stdout || null : null
   const clean = statusResult.ok && statusResult.stdout === ''
-  return { ...repo, ...pkg, branch, clean }
+  return { ...repo, ...pkg, branch, clean, defaultBranch }
 }
 
 export function inspectRepos(repos, concurrency) {

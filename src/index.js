@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Command } from 'commander'
 import pc from 'picocolors'
 import { listCommand } from './commands/list.js'
@@ -13,6 +16,12 @@ import { execCommand } from './commands/exec.js'
 import { outdatedCommand } from './commands/outdated.js'
 import { prsCommand } from './commands/prs.js'
 import { cloneCommand } from './commands/clone.js'
+
+// Read once from package.json rather than a literal string here — the two
+// silently drifted apart before (this file said 1.0.0 while package.json
+// had already moved to 1.0.1).
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const { version: CLI_VERSION } = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'))
 
 const program = new Command()
 
@@ -85,9 +94,9 @@ function wrapText(text, width) {
 program
   .name('polyrepo')
   .description(
-    'Manage local npm package repos: pick which directories to scan (setup), clone missing ones from GitHub (clone), see their state (list), outdated dependencies (outdated), or open PRs (prs), run a health check (doctor), keep them on an up-to-date master (switch-master), release a version through a PR (bump), publish to npm (publish), tag an already-current version (tag), create GitHub Releases (release), or run any command across every repo (exec).',
+    'Manage local npm package repos: pick which directories to scan (setup), clone missing ones from GitHub (clone), see their state (list), outdated dependencies (outdated), or open PRs (prs), run a health check (doctor), keep them on an up-to-date default branch (switch-master), release a version through a PR (bump), publish to npm (publish), tag an already-current version (tag), create GitHub Releases (release), or run any command across every repo (exec).',
   )
-  .version('1.0.0')
+  .version(CLI_VERSION)
   .option(
     '--config <path>',
     'Path to a polyrepo.config.json listing roots/packages to scan (default: polyrepo.config.json next to this CLI).',
@@ -115,7 +124,7 @@ Examples:
   $ polyrepo list                               Show version + branch for every package
   $ polyrepo outdated                           Show outdated dependencies across every package
   $ polyrepo prs                                List open pull requests across every package
-  $ polyrepo switch-master                      Update selected repos to the latest master
+  $ polyrepo switch-master                      Update selected repos to their latest default branch
   $ polyrepo bump --dry-run                     Preview a version bump, nothing is pushed
   $ polyrepo bump --minor --packages a,b --yes  Bump specific packages' minor version, non-interactively
   $ polyrepo publish                            Publish packages that are ahead of the registry
@@ -285,41 +294,101 @@ Examples:
 
 program
   .command('doctor')
-  .description('Check environment (node/git/gh/npm, auth), config, and cross-package dependency drift.')
+  .description('Check environment, config, branch health, and dependency drift — with a few safe self-repairs.')
+  .option(
+    '--clean-branches',
+    'After scanning, show a checkbox of local bump branches whose PR is already merged, and delete the ones you pick.',
+  )
   .addHelpText(
     'after',
     `
-Read-only. Three sections: Environment (is Node.js new enough, are git/gh/npm
-on PATH and authenticated), Config (does polyrepo.config.json resolve to any
-packages, which repos are dirty or off master), and Cross-package
-dependencies (does any local package's dependencies/devDependencies/
-peerDependencies range no longer match another local package's current
-version — e.g. after a \`bump\` that package's own package.json wasn't
-updated for). Run this first if any other command is behaving strangely.
+Seven sections. Most are read-only diagnosis; three include a small,
+non-destructive self-repair:
+
+  Environment           Node.js version, git/gh/npm on PATH and authenticated.
+  Config                how many packages the config resolves to; which are
+                        dirty, in a detached HEAD state, or off their
+                        default branch.
+  Remote sync           compares each repo's locally cached default-branch
+                        name against what GitHub reports right now — git
+                        never refreshes that cache on its own, so a rename
+                        on GitHub would otherwise go unnoticed by every
+                        other command forever; drifted ones are fixed with
+                        \`git remote set-head origin --auto\`. Also runs
+                        \`git remote prune origin\` on every repo, dropping
+                        local refs for branches already deleted on GitHub.
+                        Both are pointer-only fixes — no file, branch, or
+                        commit is ever touched.
+  Branch sync           fetches and compares each repo's local default
+                        branch against origin: diverged (needs manual
+                        resolution), behind only (safe to fast-forward with
+                        \`switch-master\`), or ahead only (unpushed local
+                        commits) — surfaced before a command trips over it.
+  Branch protection     whether each repo's default branch actually has
+                        GitHub branch protection enabled. Report-only —
+                        enabling protection is a policy choice, not
+                        something to set on your behalf.
+  Stale bump branches   \`bump\` merges through a PR with the branch left on
+                        origin (see \`bump\` above), so a local copy sticks
+                        around too. Reports how many have an already-merged
+                        PR; \`--clean-branches\` turns that into a checkbox
+                        to delete the local ones you pick (\`git branch -d\`
+                        — never the branch on origin, and refuses instead
+                        of forcing if a branch isn't actually fully merged
+                        locally).
+  Cross-package deps    does any local package's dependency range no longer
+                        match another local package's current version.
+
+Run this first if any other command is behaving strangely, and any time
+you rename a branch on GitHub or want to check for accumulated cruft.
 
 Examples:
   $ polyrepo doctor
+  $ polyrepo doctor --clean-branches
 `,
   )
-  .action(() => doctorCommand({ configPath: program.opts().config }))
+  .action((opts) =>
+    doctorCommand({
+      configPath: program.opts().config,
+      cleanBranches: Boolean(opts.cleanBranches),
+    }),
+  )
 
 program
   .command('switch-master')
   .alias('sm')
-  .description('Pick repos and switch each to an up-to-date master.')
+  .description('Pick repos and switch each to its up-to-date default branch.')
   .option(...PACKAGES_OPTION)
   .option(...YES_OPTION)
+  .option(
+    '--force',
+    "Discard uncommitted changes and any local-only commits on a repo's default branch, hard-resetting it to match origin.",
+  )
   .addHelpText(
     'after',
     `
-For each selected repo: fetch, checkout master, fast-forward-only merge.
-A repo with uncommitted changes is skipped with a warning, never touched.
-If local master has diverged from origin (fast-forward impossible), that
-repo is reported and left alone for you to resolve by hand.
+Each repo's default branch is detected per repo (from origin — GitHub
+defaults new repos to "main", but plenty of people rename it, "master"
+included, so this never assumes one name for every repo). For each
+selected repo: fetch, checkout its default branch, fast-forward-only
+merge. A repo with uncommitted changes is skipped with a warning, never
+touched. If the local default branch has diverged from origin
+(fast-forward impossible), that repo is reported and left alone for you
+to resolve by hand.
+
+--force changes this: dirty repos are no longer skipped, and every
+selected repo gets \`git checkout -f <default branch>\` + \`git reset --hard
+origin/<default branch>\` instead of the safe fast-forward-only merge —
+uncommitted changes to tracked files and any local-only commits on that
+branch are permanently discarded (untracked files are left alone, this
+isn't \`git clean\`). The proceed confirmation says how many selected
+repos are dirty and defaults to "No" when --force would actually discard
+something.
 
 Examples:
   $ polyrepo switch-master
   $ polyrepo sm --packages vue-toast-kit,os-detect --yes
+  $ polyrepo sm --packages vue-toast-kit --force   Discard its local changes and hard-reset to origin
 `,
   )
   .action((opts) =>
@@ -327,12 +396,13 @@ Examples:
       configPath: program.opts().config,
       packages: opts.packages ? opts.packages.split(',') : undefined,
       yes: Boolean(opts.yes),
+      force: Boolean(opts.force),
     }),
   )
 
 program
   .command('bump')
-  .description('Pick packages, bump their version (patch by default), PR, merge to master, and tag.')
+  .description('Pick packages, bump their version (patch by default), PR, merge to the default branch, and tag.')
   .option('--dry-run', 'Print every step without pushing, opening, merging, or tagging anything for real.')
   .option('--minor', 'Bump the minor version instead of patch (e.g. 1.2.9 → 1.3.0).')
   .option('--major', 'Bump the major version instead of patch (e.g. 1.2.9 → 2.0.0).')
@@ -421,9 +491,10 @@ program
     `
 For a package whose version was bumped some other way (not through
 \`polyrepo bump\`, or before it started tagging) — puts the \`v<version>\` tag on
-master's current tip, no version change and no PR, so \`polyrepo release\` has
-something to work from. Re-syncs master first for each package, same as
-\`bump\` does. Already-tagged packages are shown but unchecked by default
+its default branch's current tip, no version change and no PR, so
+\`polyrepo release\` has something to work from. Re-syncs the default branch
+first for each package, same as \`bump\` does. Already-tagged packages are
+shown but unchecked by default
 (picking one anyway just confirms the tag is there, harmless). After
 tagging, asks whether to create a GitHub Release right away for whatever
 was just tagged (same as running \`polyrepo release\` for exactly those

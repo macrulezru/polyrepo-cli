@@ -1,14 +1,13 @@
 import { confirm } from '@inquirer/prompts'
 import pc from 'picocolors'
 import { discoverRepos, inspectRepos } from '../repos.js'
-import { MASTER_BRANCH } from '../config.js'
 import { loadConfig } from '../loadConfig.js'
 import { syncMaster } from '../masterSync.js'
 import { selectPackages } from '../selectPackages.js'
 import { heading, stepHeading, ok, fail, warn, columnWidths, formatRow } from '../ui.js'
 import { startSpinner } from '../spinner.js'
 
-export async function switchMasterCommand({ configPath, packages, yes = false } = {}) {
+export async function switchMasterCommand({ configPath, packages, yes = false, force = false } = {}) {
   const config = loadConfig({ configPath })
   const discovered = discoverRepos(config)
   if (discovered.length === 0) {
@@ -16,7 +15,7 @@ export async function switchMasterCommand({ configPath, packages, yes = false } 
     return
   }
 
-  heading(`Switch to ${MASTER_BRANCH}`)
+  heading('Switch to default branch')
 
   const spinner = startSpinner(`Checking ${discovered.length} package(s)...`)
   const repos = await inspectRepos(discovered)
@@ -25,16 +24,21 @@ export async function switchMasterCommand({ configPath, packages, yes = false } 
   const selected = await selectPackages({
     items: repos,
     packages,
-    message: 'Pick repos to switch to master and update:',
+    message: "Pick repos to switch to their default branch and update:",
     buildChoice: (all) => {
       const columns = [{ value: (r) => r.dir }]
       const widths = columnWidths(all, columns)
       return (r) => ({
         name:
           formatRow(r, columns, widths) +
-          pc.dim(`  (currently on: ${r.branch ?? '(detached)'}${r.clean ? '' : ', dirty'})`),
+          pc.dim(
+            `  (currently on: ${r.branch ?? '(detached)'}${r.clean ? '' : ', dirty'}${
+              r.branch !== r.defaultBranch ? `, default: ${r.defaultBranch}` : ''
+            })`,
+          ) +
+          (force && !r.clean ? pc.red('  will discard uncommitted changes') : ''),
         value: r,
-        checked: r.branch !== MASTER_BRANCH,
+        checked: r.branch !== r.defaultBranch,
       })
     },
   })
@@ -44,10 +48,15 @@ export async function switchMasterCommand({ configPath, packages, yes = false } 
     return
   }
 
+  const dirtyCount = selected.filter((r) => !r.clean).length
+
   if (!yes) {
     const proceed = await confirm({
-      message: `Switch ${selected.length} repo(s) to ${MASTER_BRANCH} and fast-forward?`,
-      default: true,
+      message:
+        force && dirtyCount > 0
+          ? `Switch ${selected.length} repo(s) to their default branch — ${dirtyCount} of them dirty, their uncommitted changes will be permanently discarded. Continue?`
+          : `Switch ${selected.length} repo(s) to their default branch and fast-forward?`,
+      default: !force,
     })
     if (!proceed) {
       console.log(pc.dim('Cancelled.'))
@@ -60,17 +69,21 @@ export async function switchMasterCommand({ configPath, packages, yes = false } 
     index += 1
     stepHeading(index, selected.length, repo.dir)
 
-    if (!repo.clean) {
+    if (!repo.clean && !force) {
       warn(`Working tree is dirty — skipping to avoid discarding local changes.`)
       continue
     }
 
-    const result = syncMaster(repo)
+    const result = syncMaster(repo, { force })
     if (!result.ok) {
       fail(result.message)
       continue
     }
 
-    ok(`Now on ${MASTER_BRANCH}, up to date with origin.`)
+    ok(
+      force && !repo.clean
+        ? `Discarded local changes — now on ${repo.defaultBranch}, matching origin.`
+        : `Now on ${repo.defaultBranch}, up to date with origin.`,
+    )
   }
 }

@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import { confirm } from '@inquirer/prompts'
 import pc from 'picocolors'
 import { discoverRepos, inspectRepos, readPackageJson } from '../repos.js'
-import { MASTER_BRANCH, bumpBranchName } from '../config.js'
+import { bumpBranchName } from '../config.js'
 import { loadConfig } from '../loadConfig.js'
 import { bumpVersion, replaceVersionInText } from '../version.js'
 import { git } from '../exec.js'
@@ -84,7 +84,7 @@ export async function bumpCommand({
 
   if (!yes) {
     const proceed = await confirm({
-      message: `Bump ${selected.length} package(s), open a PR, and merge each into ${MASTER_BRANCH}?${
+      message: `Bump ${selected.length} package(s), open a PR, and merge each into its default branch?${
         dryRun ? ' (dry run — no changes will actually be pushed)' : ''
       }`,
       default: true,
@@ -113,7 +113,7 @@ async function bumpOne(repo, { dryRun, waitChecks }) {
 
   const syncResult = syncMaster(repo)
   if (!syncResult.ok) return fail(syncResult.message)
-  ok(`${MASTER_BRANCH} is up to date.`)
+  ok(`${repo.defaultBranch} is up to date.`)
 
   const branchName = bumpBranchName(repo.newVersion)
   const state = detectBumpState(repo, branchName)
@@ -172,7 +172,7 @@ async function bumpOne(repo, { dryRun, waitChecks }) {
 
     if (state.status !== 'open') {
       const prResult = createPr(repo, {
-        base: MASTER_BRANCH,
+        base: repo.defaultBranch,
         branch: branchName,
         title: `chore: bump version to ${repo.newVersion}`,
         body: `Bump version: ${repo.version} → ${repo.newVersion}.`,
@@ -195,9 +195,9 @@ async function bumpOne(repo, { dryRun, waitChecks }) {
 
     const resyncResult = syncMaster(repo)
     if (!resyncResult.ok) return fail(resyncResult.message)
-    ok(`Local ${MASTER_BRANCH} synced to origin at ${repo.newVersion}.`)
+    ok(`Local ${repo.defaultBranch} synced to origin at ${repo.newVersion}.`)
   } else {
-    ok(`Already merged as PR #${state.pr.number} — ${MASTER_BRANCH} already has it.`)
+    ok(`Already merged as PR #${state.pr.number} — ${repo.defaultBranch} already has it.`)
   }
 
   const tag = tagName(repo.newVersion)
@@ -213,8 +213,9 @@ async function bumpOne(repo, { dryRun, waitChecks }) {
 // Reuse a local branch left over from a previous attempt if there is one,
 // otherwise track the remote branch if a previous attempt got as far as
 // pushing it, otherwise create it fresh from the current (just-synced)
-// master. Trying "reuse" first before falling back is what makes this safe
-// to call again after any partial failure without any state bookkeeping.
+// default branch. Trying "reuse" first before falling back is what makes
+// this safe to call again after any partial failure without any state
+// bookkeeping.
 function checkoutBumpBranch(repo, branchName) {
   if (git(repo.path, ['checkout', branchName], { quiet: true }).ok) {
     return { ok: true, reused: true }
