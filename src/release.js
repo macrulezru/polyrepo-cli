@@ -9,7 +9,7 @@ export async function releaseExistsAsync(repo, tag) {
 }
 
 // `--verify-tag` makes this fail loudly instead of inventing a new tag if
-// the one we expect (from `vpc bump`) somehow isn't on origin yet — a
+// the one we expect (from `polyrepo bump`) somehow isn't on origin yet — a
 // release should only ever point at a tag that already exists. Notes come
 // from the matching CHANGELOG.md section when there is one (see
 // changelog.js's extractChangelogSection), otherwise gh's own
@@ -18,7 +18,7 @@ export function createRelease(repo, { tag, title, notes, dryRun }) {
   const args = ['release', 'create', tag, '--verify-tag', '--title', title]
   let tempFile
   if (notes) {
-    tempFile = path.join(os.tmpdir(), `vpc-release-notes-${process.pid}-${Date.now()}.md`)
+    tempFile = path.join(os.tmpdir(), `polyrepo-release-notes-${process.pid}-${Date.now()}.md`)
     fs.writeFileSync(tempFile, notes)
     args.push('--notes-file', tempFile)
   } else {

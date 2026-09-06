@@ -13,7 +13,7 @@ export function tagExists(repo, tag) {
 }
 
 // Same check, used where many repos are checked at once (see pMap) —
-// `vpc tag`'s package list, for one.
+// `polyrepo tag`'s package list, for one.
 export async function tagExistsAsync(repo, tag) {
   const result = await gitAsync(repo.path, ['ls-remote', '--exit-code', '--tags', 'origin', tag])
   return result.ok

@@ -20,7 +20,7 @@ export async function releaseCommand({ configPath, packages, yes = false, dryRun
   heading('GitHub releases')
 
   console.log(pc.dim(`Checking ${repos.length} package(s) for a tag and an existing release...`))
-  // A release always targets `v<local version>` — the tag `vpc bump`
+  // A release always targets `v<local version>` — the tag `polyrepo bump`
   // creates. No tag for the current version means there's nothing to
   // release yet; a tag with no release is exactly what this command is for.
   const withStatus = await pMap(repos, async (r) => {
@@ -41,7 +41,7 @@ export async function releaseCommand({ configPath, packages, yes = false, dryRun
   // reports "no tag" per package on its own).
   if (!packages && withStatus.every((r) => r.status === 'no-tag')) {
     console.log(
-      pc.yellow('No packages are tagged yet — run `vpc bump` (new version) or `vpc tag` (current version) first.'),
+      pc.yellow('No packages are tagged yet — run `polyrepo bump` (new version) or `polyrepo tag` (current version) first.'),
     )
     return
   }
@@ -60,7 +60,7 @@ export async function releaseCommand({ configPath, packages, yes = false, dryRun
         name: formatRow(r, columns, widths) + statusSuffix(r),
         value: r,
         checked: r.status === 'ready',
-        disabled: r.status === 'no-tag' ? '(no tag yet — run `vpc bump` or `vpc tag` first)' : false,
+        disabled: r.status === 'no-tag' ? '(no tag yet — run `polyrepo bump` or `polyrepo tag` first)' : false,
       })
     },
   })
@@ -91,7 +91,7 @@ export async function releaseCommand({ configPath, packages, yes = false, dryRun
     // is the guard for that path (and cheap insurance against the status
     // having gone stale between the check above and here).
     if (repo.status === 'no-tag') {
-      fail(`No tag ${repo.tag} on origin — run \`vpc bump\` or \`vpc tag\` first.`)
+      fail(`No tag ${repo.tag} on origin — run \`polyrepo bump\` or \`polyrepo tag\` first.`)
       continue
     }
 
@@ -99,7 +99,7 @@ export async function releaseCommand({ configPath, packages, yes = false, dryRun
   }
 }
 
-// Also used by `vpc tag` to offer "release what I just tagged" right after
+// Also used by `polyrepo tag` to offer "release what I just tagged" right after
 // tagging, without making that command build its own checkbox/confirm and
 // re-discover which packages are release-ready — it already knows exactly.
 export function releaseOne(repo, tag, { dryRun } = {}) {

@@ -7,7 +7,7 @@ const PREVIEW_LIMIT = 5
 // Summarizes what changed on local master since the last `v*` tag (or the
 // last few commits if there's no tag yet), so the bump checklist can show
 // whether a package actually has anything worth releasing. Reflects local
-// repo state — run `vpc switch-master` first if it might be stale. Run
+// repo state — run `polyrepo switch-master` first if it might be stale. Run
 // through pMap across many repos at once (see describeRecentChangesForAll)
 // — this builds the bump checkbox's preview, and waiting on 3 sequential
 // git calls per repo, 17 times over, added up to a real pause before the

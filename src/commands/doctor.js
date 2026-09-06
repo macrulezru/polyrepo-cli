@@ -17,7 +17,7 @@ export async function doctorCommand({ configPath } = {}) {
   console.log(pc.dim(`Config file: ${config.configPath}`))
   const repos = await inspectRepos(discoverRepos(config))
   if (repos.length === 0) {
-    fail('No packages discovered — check `vpc setup`.')
+    fail('No packages discovered — check `polyrepo setup`.')
   } else {
     ok(`${repos.length} package(s) discovered.`)
     const dirty = repos.filter((r) => !r.clean)
@@ -84,13 +84,13 @@ function checkGh() {
 function checkNpm() {
   const version = run('.', 'npm', ['--version'], { quiet: true })
   if (!version.ok) {
-    fail('npm not found in PATH — required only for `vpc publish`.')
+    fail('npm not found in PATH — required only for `polyrepo publish`.')
     return
   }
   const who = run('.', 'npm', ['whoami'], { quiet: true })
   if (who.ok) {
     ok(`npm ${version.stdout} — authenticated as ${who.stdout}.`)
   } else {
-    warn(`npm ${version.stdout} — not authenticated (only needed for \`vpc publish\`). Run \`npm login\`.`)
+    warn(`npm ${version.stdout} — not authenticated (only needed for \`polyrepo publish\`). Run \`npm login\`.`)
   }
 }

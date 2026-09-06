@@ -19,9 +19,9 @@ const EMPTY_CONFIG = { roots: [], packages: [] }
 //   }
 // Both keys are optional and additive. Relative paths are resolved against
 // the config file's own directory, not the current working directory —
-// so the config stays correct no matter where `vpc` is invoked from
+// so the config stays correct no matter where `polyrepo` is invoked from
 // (important once it's `npm link`-ed globally). Edit this file by hand or
-// through `vpc setup`.
+// through `polyrepo setup`.
 export function loadConfig({ configPath } = {}) {
   const resolvedPath = resolveConfigFilePath(configPath)
 
@@ -37,19 +37,19 @@ export function loadConfig({ configPath } = {}) {
       raw = EMPTY_CONFIG
       baseDir = path.dirname(DEFAULT_CONFIG_PATH)
     }
-  } else if (configPath || process.env.VPC_CONFIG) {
-    // An explicit --config / VPC_CONFIG path was given but doesn't exist —
+  } else if (configPath || process.env.POLYREPO_CONFIG) {
+    // An explicit --config / POLYREPO_CONFIG path was given but doesn't exist —
     // that's almost certainly a typo, worth a loud warning rather than a
     // silent fallback.
     console.log(pc.red(`Config file not found: ${resolvedPath}`))
   } else {
-    console.log(pc.yellow(`No config found at ${resolvedPath} — run \`vpc setup\` to add package directories.`))
+    console.log(pc.yellow(`No config found at ${resolvedPath} — run \`polyrepo setup\` to add package directories.`))
   }
 
-  // VPC_ROOT is a lighter-weight override for a single one-off run — it
+  // POLYREPO_ROOT is a lighter-weight override for a single one-off run — it
   // replaces the configured roots but leaves any explicit `packages` entries
   // from the config file in place.
-  const roots = process.env.VPC_ROOT ? [process.env.VPC_ROOT] : raw.roots
+  const roots = process.env.POLYREPO_ROOT ? [process.env.POLYREPO_ROOT] : raw.roots
 
   return {
     configPath: resolvedPath,
