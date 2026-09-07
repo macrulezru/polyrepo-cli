@@ -16,6 +16,31 @@ test('bumpVersion defaults to patch', () => {
   assert.equal(bumpVersion('1.2.9'), '1.2.10')
 })
 
+test('bumpVersion starts a prerelease from a plain version', () => {
+  assert.equal(bumpVersion('1.2.9', 'prerelease', { preid: 'alpha' }), '1.2.10-alpha.0')
+})
+
+test('bumpVersion advances an existing prerelease', () => {
+  assert.equal(bumpVersion('1.2.10-alpha.0', 'prerelease', { preid: 'alpha' }), '1.2.10-alpha.1')
+})
+
+test('bumpVersion starts a premajor/preminor prerelease', () => {
+  assert.equal(bumpVersion('1.2.9', 'premajor', { preid: 'beta' }), '2.0.0-beta.0')
+  assert.equal(bumpVersion('1.2.9', 'preminor', { preid: 'beta' }), '1.3.0-beta.0')
+})
+
+test('bumpVersion rejects a prerelease bump it cannot parse', () => {
+  assert.throws(() => bumpVersion('not-a-version', 'prerelease', { preid: 'alpha' }), /Cannot parse version/)
+})
+
+test('bumpVersion sets an exact custom version', () => {
+  assert.equal(bumpVersion('1.2.9', 'custom', { customVersion: '3.0.0-hotfix.1' }), '3.0.0-hotfix.1')
+})
+
+test('bumpVersion rejects an invalid custom version', () => {
+  assert.throws(() => bumpVersion('1.2.9', 'custom', { customVersion: 'not-a-version' }), /Not a valid semver version/)
+})
+
 test('bumpPatch increments the patch number', () => {
   assert.equal(bumpPatch('1.2.9'), '1.2.10')
   assert.equal(bumpPatch('0.0.0'), '0.0.1')
