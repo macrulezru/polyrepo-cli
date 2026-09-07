@@ -3,18 +3,23 @@
 ![Rest Pipeline JS](https://github.com/macrulezru/assets/blob/master/packages-images/polyrepo-cli.png?raw=true)
 
 An interactive CLI for managing a folder of local npm package repos:
-version bumps through a pull request, npm publishing, GitHub releases,
+version bumps through a pull request, npm publishing, releases,
 and cross-package dependency drift — all from one tool, all reviewable
-with `--dry-run` before anything actually changes.
+with `--dry-run` before anything actually changes. Works with GitHub and
+GitLab (including self-hosted), autodetected per repo — a folder can
+freely mix both.
 
 ## Features
 
 - **`setup`** — add, edit, or remove the package directories the CLI
-  scans, right from the terminal — no hand-editing JSON.
-- **`clone`** — diff a GitHub org/user's repo list against what's
-  already cloned under a root, and clone whatever's missing.
+  scans, right from the terminal — no hand-editing JSON. Also where a
+  self-hosted GitLab instance's hostname is registered (`gitlab.com`
+  itself needs no setup).
+- **`clone`** — diff a GitHub org's (or, with `--provider gitlab`, a
+  GitLab group's) repo list against what's already cloned under a
+  root, and clone whatever's missing.
 - **`list`** — one table per package: version, branch, git status, git
-  tag, GitHub Release, npm registry status, and cross-package
+  tag, release status, npm registry status, and cross-package
   dependency drift. `list --quick` skips the network checks for an
   instant version/branch/git-only view; `list --output <path>` also
   saves the same table as Markdown, JSON, CSV, HTML, or plain text.
@@ -23,11 +28,12 @@ with `--dry-run` before anything actually changes.
 - **`audit`** — one table across every package of npm security
   vulnerabilities (`npm audit`), grouped by package and colored by
   severity, with whether a fix is available.
-- **`prs`** — one table of every open pull request across every
-  package (`gh pr list`) — useful after an interrupted `bump` run to
-  see what's still waiting to be merged.
-- **`doctor`** — a one-command health check: environment (Node/git/gh/npm,
-  authentication), branch health (default-branch name drift, stale
+- **`prs`** — one table of every open pull/merge request across every
+  package — useful after an interrupted `bump` run to see what's still
+  waiting to be merged.
+- **`doctor`** — a one-command health check: environment (Node/git/npm,
+  authentication — checks `gh` and/or `glab`, whichever your repos
+  actually use), branch health (default-branch name drift, stale
   remote-tracking refs, divergence from origin, detached `HEAD`,
   missing branch protection, leftover `bump` branches — with a few
   safe, non-destructive self-repairs along the way, and
@@ -50,9 +56,9 @@ with `--dry-run` before anything actually changes.
   ahead of the registry, after comparing each one automatically.
 - **`tag`** — tag a package at its *current* version without bumping
   again, for when the version was already moved forward some other
-  way. Offers to create a GitHub Release right after.
-- **`release`** — create a GitHub Release from a tag, with notes
-  pulled from the matching `CHANGELOG.md` section when there is one.
+  way. Offers to create a release right after.
+- **`release`** — create a release from a tag, with notes pulled from
+  the matching `CHANGELOG.md` section when there is one.
 - **`exec`** — run any command (`npm test`, `npm outdated`, a lint
   script, anything) across every selected package, one at a time, with
   a real terminal.
@@ -73,10 +79,14 @@ follow.
 
 - Node.js 20+
 - `git` on `PATH`
-- [`gh`](https://cli.github.com/) (GitHub CLI), authenticated
-  (`gh auth status`) — needed for opening/merging pull requests,
-  checking the state of a previous `bump` attempt, CI checks
-  (`bump --wait-checks`), and `tag`/`release`
+- For GitHub repos: [`gh`](https://cli.github.com/) (GitHub CLI),
+  authenticated (`gh auth status`)
+- For GitLab repos: [`glab`](https://gitlab.com/gitlab-org/cli) (GitLab
+  CLI), authenticated (`glab auth status`) — self-hosted instances need
+  their hostname registered via `polyrepo setup` first
+- Either (or both, for a mixed folder) is needed for opening/merging
+  pull/merge requests, checking the state of a previous `bump`
+  attempt, CI checks (`bump --wait-checks`), and `tag`/`release`
 - `npm` on `PATH`, authenticated (`npm whoami`) — needed only for
   `publish`
 
@@ -132,8 +142,8 @@ Checking 18 package(s)...
 
 Remote sync
 
-Checking 18 package(s) against GitHub, and pruning stale remote-tracking refs...
-  ✓ 18 package(s) checked — local default-branch cache matches GitHub.
+Checking 18 package(s) against their host, and pruning stale remote-tracking refs...
+  ✓ 18 package(s) checked — local default-branch cache matches the host.
   ✓ os-detect: pruned 2 stale remote-tracking ref(s) (add-more-examples, new-documentation-refactor).
 
 Branch sync

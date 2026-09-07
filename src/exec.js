@@ -108,6 +108,10 @@ export function ghAsync(cwd, args) {
   return runAsync(cwd, 'gh', args)
 }
 
+export function glabAsync(cwd, args) {
+  return runAsync(cwd, 'glab', args)
+}
+
 export function npmAsync(cwd, args) {
   return runAsync(cwd, 'npm', args)
 }
@@ -125,6 +129,10 @@ export function git(cwd, args, opts) {
 
 export function gh(cwd, args, opts) {
   return run(cwd, 'gh', args, opts)
+}
+
+export function glab(cwd, args, opts) {
+  return run(cwd, 'glab', args, opts)
 }
 
 export function npm(cwd, args, opts) {

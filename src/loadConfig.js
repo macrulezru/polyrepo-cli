@@ -9,19 +9,20 @@ import { resolveConfigFilePath, readConfigFile, DEFAULT_CONFIG_PATH } from './co
 // means `discoverRepos` finds nothing, and every command already prints
 // "No repos found." for that — the hint below is what actually points
 // people at the fix.
-const EMPTY_CONFIG = { roots: [], packages: [] }
+const EMPTY_CONFIG = { roots: [], packages: [], gitlabHosts: [] }
 
 // Config shape:
 //   {
-//     "roots": ["/path/to/repos-folder"],   // each entry: a folder whose
-//                                            // direct subdirectories are packages
-//     "packages": ["/path/to/one-off-repo"] // each entry: a single package folder itself
+//     "roots": ["/path/to/repos-folder"],    // each entry: a folder whose
+//                                             // direct subdirectories are packages
+//     "packages": ["/path/to/one-off-repo"], // each entry: a single package folder itself
+//     "gitlabHosts": ["gitlab.company.com"]  // self-hosted GitLab hostnames (see providers/detect.js)
 //   }
-// Both keys are optional and additive. Relative paths are resolved against
-// the config file's own directory, not the current working directory —
-// so the config stays correct no matter where `polyrepo` is invoked from
-// (important once it's `npm link`-ed globally). Edit this file by hand or
-// through `polyrepo setup`.
+// All three keys are optional and additive. Relative paths in roots/packages
+// are resolved against the config file's own directory, not the current
+// working directory — so the config stays correct no matter where
+// `polyrepo` is invoked from (important once it's `npm link`-ed globally).
+// Edit this file by hand or through `polyrepo setup`.
 export function loadConfig({ configPath } = {}) {
   const resolvedPath = resolveConfigFilePath(configPath)
 
@@ -55,6 +56,8 @@ export function loadConfig({ configPath } = {}) {
     configPath: resolvedPath,
     roots: roots.map((p) => resolveAgainst(baseDir, p)),
     packages: raw.packages.map((p) => resolveAgainst(baseDir, p)),
+    // Hostnames, not paths — nothing to resolve against baseDir.
+    gitlabHosts: (raw.gitlabHosts ?? []).map((h) => h.toLowerCase()),
   }
 }
 

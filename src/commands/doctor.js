@@ -2,27 +2,42 @@ import { checkbox, confirm } from '@inquirer/prompts'
 import pc from 'picocolors'
 import { discoverRepos, inspectRepos } from '../repos.js'
 import { loadConfig } from '../loadConfig.js'
-import { run, git, gitAsync, ghAsync } from '../exec.js'
+import { run, git, gitAsync } from '../exec.js'
 import { findStaleLocalDeps } from '../crossDeps.js'
 import { isBumpBranchName } from '../config.js'
 import { pMap } from '../pMap.js'
+import { ALL_PROVIDERS, providerFor, providerNameFor } from '../providers/index.js'
 import { heading, ok, fail, warn, columnWidths, formatRow, promptTheme } from '../ui.js'
 import { startSpinner } from '../spinner.js'
 
 export async function doctorCommand({ configPath, cleanBranches = false } = {}) {
+  // Discovered before printing "Environment" (unlike every other section
+  // here, which discovers after) — which host CLI(s) to check depends on
+  // which providers the repos actually use, so that has to be known first.
+  const config = loadConfig({ configPath })
+  const discovered = discoverRepos(config)
+  const discoverySpinner = startSpinner(`Checking ${discovered.length} package(s)...`)
+  const repos = await inspectRepos(discovered)
+  discoverySpinner.stop()
+
   heading('Environment')
   checkNode()
   checkGit()
-  checkGh()
+  const providersInUse = new Set(repos.map((r) => providerNameFor(r, config)).filter(Boolean))
+  if (providersInUse.size === 0) {
+    // No repos discovered yet, or none with a recognizable origin — still
+    // worth checking `gh` (the default/most common case) so `doctor` says
+    // something useful before `polyrepo setup` has ever been run.
+    checkProviderCli(ALL_PROVIDERS[0])
+  } else {
+    for (const provider of ALL_PROVIDERS) {
+      if (providersInUse.has(provider.name)) checkProviderCli(provider)
+    }
+  }
   checkNpm()
 
   heading('Config')
-  const config = loadConfig({ configPath })
   console.log(pc.dim(`Config file: ${config.configPath}`))
-  const discovered = discoverRepos(config)
-  const spinner = startSpinner(`Checking ${discovered.length} package(s)...`)
-  const repos = await inspectRepos(discovered)
-  spinner.stop()
   if (repos.length === 0) {
     fail('No packages discovered — check `polyrepo setup`.')
   } else {
@@ -43,7 +58,7 @@ export async function doctorCommand({ configPath, cleanBranches = false } = {}) 
 
   heading('Remote sync')
   if (repos.length > 0) {
-    await checkRemoteSync(repos)
+    await checkRemoteSync(repos, config)
   } else {
     console.log(pc.dim('Skipped — no packages discovered.'))
   }
@@ -57,14 +72,14 @@ export async function doctorCommand({ configPath, cleanBranches = false } = {}) 
 
   heading('Branch protection')
   if (repos.length > 0) {
-    await checkBranchProtection(repos)
+    await checkBranchProtection(repos, config)
   } else {
     console.log(pc.dim('Skipped — no packages discovered.'))
   }
 
   heading('Stale bump branches')
   if (repos.length > 0) {
-    await checkStaleBumpBranches(repos, { cleanBranches })
+    await checkStaleBumpBranches(repos, { cleanBranches, config })
   } else {
     console.log(pc.dim('Skipped — no packages discovered.'))
   }
@@ -89,27 +104,20 @@ export async function doctorCommand({ configPath, cleanBranches = false } = {}) 
 // Every other command trusts the locally cached `origin/HEAD` ref as the
 // fast, no-network path for "what's this repo's default branch" (see
 // detectDefaultBranchAsync in repos.js) — but git never refreshes that
-// cache on its own, so if the default branch gets renamed on GitHub after
-// a repo was cloned, every command would keep using the old name forever
-// with nothing to notice or fix it. This repairs it with `git remote
-// set-head origin --auto` wherever it's drifted — a safe, non-destructive
-// pointer refresh, not a change to any file, branch, or commit. Bundled
-// with `git remote prune origin` (same "keep local remote-tracking state
-// honest" spirit): drops local `remotes/origin/x` refs for branches
-// already deleted on GitHub — also just local bookkeeping, touches
-// nothing shared.
-async function checkRemoteSync(repos) {
-  const spinner = startSpinner(`Checking ${repos.length} package(s) against GitHub, and pruning stale remote-tracking refs...`)
+// cache on its own, so if the default branch gets renamed on the host
+// after a repo was cloned, every command would keep using the old name
+// forever with nothing to notice or fix it. This repairs it with `git
+// remote set-head origin --auto` wherever it's drifted — a safe,
+// non-destructive pointer refresh, not a change to any file, branch, or
+// commit. Bundled with `git remote prune origin` (same "keep local
+// remote-tracking state honest" spirit): drops local `remotes/origin/x`
+// refs for branches already deleted on the host — also just local
+// bookkeeping, touches nothing shared.
+async function checkRemoteSync(repos, config) {
+  const spinner = startSpinner(`Checking ${repos.length} package(s) against their host, and pruning stale remote-tracking refs...`)
   const results = await pMap(repos, async (r) => {
-    const ghResult = await ghAsync(r.path, [
-      'repo',
-      'view',
-      '--json',
-      'defaultBranchRef',
-      '-q',
-      '.defaultBranchRef.name',
-    ])
-    const actual = ghResult.ok && ghResult.stdout ? ghResult.stdout : null
+    const provider = providerFor(r, config)
+    const actual = provider ? await provider.getDefaultBranchAsync(r) : null
 
     const pruneResult = await gitAsync(r.path, ['remote', 'prune', 'origin'])
     const pruned = pruneResult.ok ? [...pruneResult.stdout.matchAll(/\[pruned\] origin\/(\S+)/g)].map((m) => m[1]) : []
@@ -120,23 +128,23 @@ async function checkRemoteSync(repos) {
 
   const checked = results.filter((r) => r.actual)
   if (checked.length === 0) {
-    console.log(pc.dim('Default branch: skipped — could not reach GitHub for any package (offline, or `gh` not authenticated).'))
+    console.log(pc.dim('Default branch: skipped — could not reach the host for any package (offline, `gh`/`glab` not authenticated, or no recognized host).'))
   } else {
     const drifted = checked.filter((r) => r.actual !== r.repo.defaultBranch)
     for (const { repo, actual } of drifted) {
       const fixResult = git(repo.path, ['remote', 'set-head', 'origin', '--auto'])
       if (fixResult.ok) {
-        ok(`${repo.dir}: local cache said "${repo.defaultBranch}", GitHub says "${actual}" — refreshed the local cache.`)
+        ok(`${repo.dir}: local cache said "${repo.defaultBranch}", the host says "${actual}" — refreshed the local cache.`)
       } else {
-        fail(`${repo.dir}: local cache said "${repo.defaultBranch}", GitHub says "${actual}" — could not refresh it (git remote set-head failed).`)
+        fail(`${repo.dir}: local cache said "${repo.defaultBranch}", the host says "${actual}" — could not refresh it (git remote set-head failed).`)
       }
     }
     if (drifted.length === 0) {
-      ok(`${checked.length} package(s) checked — local default-branch cache matches GitHub.`)
+      ok(`${checked.length} package(s) checked — local default-branch cache matches the host.`)
     }
     const uncheckedCount = repos.length - checked.length
     if (uncheckedCount > 0) {
-      console.log(pc.dim(`  (${uncheckedCount} package(s) could not be checked against GitHub.)`))
+      console.log(pc.dim(`  (${uncheckedCount} package(s) could not be checked against their host.)`))
     }
   }
 
@@ -207,17 +215,19 @@ async function checkBranchSync(repos) {
 // choice (required reviewers, status checks, etc.), not something to
 // configure on someone's behalf. Just surfaces it, since this whole tool
 // assumes every managed repo requires a PR to reach its default branch.
-async function checkBranchProtection(repos) {
+async function checkBranchProtection(repos, config) {
   const spinner = startSpinner(`Checking ${repos.length} package(s) for branch protection...`)
   const results = await pMap(repos, async (r) => {
-    const result = await ghAsync(r.path, ['api', `repos/{owner}/{repo}/branches/${r.defaultBranch}`, '--jq', '.protected'])
-    return result.ok && result.stdout ? { repo: r, protected: result.stdout === 'true' } : null
+    const provider = providerFor(r, config)
+    if (!provider) return null
+    const protectedFlag = await provider.isBranchProtectedAsync(r, r.defaultBranch)
+    return protectedFlag === null ? null : { repo: r, protected: protectedFlag }
   })
   spinner.stop()
 
   const checked = results.filter(Boolean)
   if (checked.length === 0) {
-    console.log(pc.dim('Skipped — could not reach GitHub for any package (offline, or `gh` not authenticated).'))
+    console.log(pc.dim('Skipped — could not reach the host for any package (offline, `gh`/`glab` not authenticated, or no recognized host).'))
     return
   }
 
@@ -231,32 +241,27 @@ async function checkBranchProtection(repos) {
 
   const uncheckedCount = repos.length - checked.length
   if (uncheckedCount > 0) {
-    console.log(pc.dim(`  (${uncheckedCount} package(s) could not be checked against GitHub.)`))
+    console.log(pc.dim(`  (${uncheckedCount} package(s) could not be checked against their host.)`))
   }
 }
 
-// `bump` merges through a PR with --delete-branch=false (see github.js),
-// so every completed bump leaves its branch behind, locally and on
-// origin, forever. This only ever offers to delete the *local* copy —
-// deleting the one on origin is more sensitive shared state, not
-// something to fold into an opt-in local cleanup.
-async function findStaleBumpBranches(repos) {
+// `bump` merges through a PR/MR with the source branch kept (see
+// providers/github.js and providers/gitlab.js), so every completed bump
+// leaves its branch behind, locally and on origin, forever. This only
+// ever offers to delete the *local* copy — deleting the one on origin is
+// more sensitive shared state, not something to fold into an opt-in
+// local cleanup.
+async function findStaleBumpBranches(repos, config) {
   const perRepo = await pMap(repos, async (r) => {
+    const provider = providerFor(r, config)
+    if (!provider) return []
     const branchesResult = await gitAsync(r.path, ['for-each-ref', 'refs/heads', '--format=%(refname:short)'])
     if (!branchesResult.ok) return []
     const candidates = branchesResult.stdout.split('\n').filter(Boolean).filter(isBumpBranchName)
     if (candidates.length === 0) return []
 
     const withStatus = await pMap(candidates, async (branch) => {
-      const prResult = await ghAsync(r.path, ['pr', 'list', '--head', branch, '--state', 'merged', '--json', 'number'])
-      let merged = false
-      if (prResult.ok && prResult.stdout) {
-        try {
-          merged = JSON.parse(prResult.stdout).length > 0
-        } catch {
-          merged = false
-        }
-      }
+      const merged = await provider.isPrMergedAsync(r, branch)
       return { repo: r, branch, merged }
     })
     return withStatus.filter((b) => b.merged)
@@ -264,9 +269,9 @@ async function findStaleBumpBranches(repos) {
   return perRepo.flat()
 }
 
-async function checkStaleBumpBranches(repos, { cleanBranches }) {
+async function checkStaleBumpBranches(repos, { cleanBranches, config }) {
   const spinner = startSpinner(`Checking ${repos.length} package(s) for leftover bump branches with a merged PR...`)
-  const stale = await findStaleBumpBranches(repos)
+  const stale = await findStaleBumpBranches(repos, config)
   spinner.stop()
 
   if (stale.length === 0) {
@@ -335,20 +340,16 @@ function checkGit() {
   }
 }
 
-function checkGh() {
-  const version = run('.', 'gh', ['--version'], { quiet: true })
-  if (!version.ok) {
-    fail('gh (GitHub CLI) not found in PATH — required for `bump`, `release`, and PR merges. https://cli.github.com/')
+// Checks whichever host CLI(s) (`gh`, `glab`) the discovered repos actually
+// need, instead of always requiring both — someone with only GitHub repos
+// shouldn't see a failed check for a tool they have no reason to install.
+function checkProviderCli(provider) {
+  const result = provider.checkAuth()
+  if (!result.ok) {
+    fail(result.message)
     return
   }
-  const versionLine = version.stdout.split('\n')[0]
-  const auth = run('.', 'gh', ['auth', 'status'], { quiet: true })
-  if (auth.ok) {
-    const who = (auth.stdout + auth.stderr).match(/Logged in to [^\s]+ account (\S+)/)
-    ok(`${versionLine}${who ? ` — authenticated as ${who[1]}` : ' — authenticated'}.`)
-  } else {
-    fail(`${versionLine} — not authenticated. Run \`gh auth login\`.`)
-  }
+  ok(`${result.versionLine}${result.who ? ` — authenticated as ${result.who}` : ' — authenticated'}.`)
 }
 
 function checkNpm() {

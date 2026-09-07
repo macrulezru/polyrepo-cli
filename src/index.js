@@ -95,7 +95,7 @@ function wrapText(text, width) {
 program
   .name('polyrepo')
   .description(
-    'Manage local npm package repos: pick which directories to scan (setup), clone missing ones from GitHub (clone), see their state (list), outdated dependencies (outdated), security vulnerabilities (audit), or open PRs (prs), run a health check (doctor), keep them on an up-to-date default branch (switch-default), release a version through a PR (bump), publish to npm (publish), tag an already-current version (tag), create GitHub Releases (release), or run any command across every repo (exec).',
+    'Manage local npm package repos on GitHub or GitLab (autodetected per repo): pick which directories to scan (setup), clone missing ones from a GitHub org or GitLab group (clone), see their state (list), outdated dependencies (outdated), security vulnerabilities (audit), or open PRs/MRs (prs), run a health check (doctor), keep them on an up-to-date default branch (switch-default), release a version through a PR/MR (bump), publish to npm (publish), tag an already-current version (tag), create releases (release), or run any command across every repo (exec).',
   )
   .version(CLI_VERSION)
   .option(
@@ -114,13 +114,16 @@ ${formatCommandsHelp(program.commands)}
 Getting started:
   First run \`polyrepo setup\` to tell it where your package repos live — a folder
   of repos (a "root", subfolders are scanned) and/or individual repo folders
-  ("packages"). \`polyrepo doctor\` checks the rest of your setup (git/gh/npm,
-  auth, cross-package dependency drift). Everything else reads the same
-  package list.
+  ("packages"). GitHub and GitLab (including self-hosted, once its host is
+  listed in \`setup\`) are both supported, autodetected per repo — a folder can
+  freely mix both. \`polyrepo doctor\` checks the rest of your setup (git/npm,
+  gh/glab auth, cross-package dependency drift). Everything else reads the
+  same package list.
 
 Examples:
   $ polyrepo setup                              Add/edit/remove package source directories
-  $ polyrepo clone --org my-org                 Clone repos from GitHub that aren't local yet
+  $ polyrepo clone --org my-org                 Clone repos from a GitHub org that aren't local yet
+  $ polyrepo clone --org my-group --provider gitlab  Same, from a GitLab group
   $ polyrepo doctor                             Check environment, auth, and dependency drift
   $ polyrepo list                               Show version + branch for every package
   $ polyrepo outdated                           Show outdated dependencies across every package
@@ -131,7 +134,7 @@ Examples:
   $ polyrepo bump --minor --packages a,b --yes  Bump specific packages' minor version, non-interactively
   $ polyrepo publish                            Publish packages that are ahead of the registry
   $ polyrepo tag                                Tag an already-current version (no bump needed)
-  $ polyrepo release                            Create GitHub Releases for tagged packages
+  $ polyrepo release                            Create releases for tagged packages
   $ polyrepo exec -- npm test                   Run any command across every (or selected) package
 
 Run \`polyrepo <command> --help\` for that command's own options and examples.
@@ -140,14 +143,18 @@ Run \`polyrepo <command> --help\` for that command's own options and examples.
 
 program
   .command('setup')
-  .description('View, add, edit, or remove the roots/packages entries in polyrepo.config.json.')
+  .description('View, add, edit, or remove the roots/packages/gitlabHosts entries in polyrepo.config.json.')
   .addHelpText(
     'after',
     `
 A "root" is a folder whose direct subfolders are packages (e.g. C:\\work\\NPM).
 A "package" is a single repo folder given directly, for one that doesn't live
-under any root. Both are edited through the same menu; nothing is written to
-disk until you choose "Save and exit".
+under any root. A "gitlabHost" is a self-hosted GitLab instance's hostname
+(e.g. gitlab.company.com) — needed only for self-hosted; gitlab.com itself
+is always recognized without listing anything (see \`polyrepo doctor\`'s
+Environment section for how host detection works). All three are edited
+through the same menu; nothing is written to disk until you choose "Save
+and exit".
 
 Examples:
   $ polyrepo setup
@@ -158,8 +165,9 @@ Examples:
 
 program
   .command('clone')
-  .description("Clone repos from a GitHub org/user that aren't already present under a root.")
-  .requiredOption('--org <name>', 'GitHub org or user to list repos from.')
+  .description("Clone repos from a GitHub org or GitLab group that aren't already present under a root.")
+  .requiredOption('--org <name>', 'GitHub org/user, or GitLab group, to list repos from.')
+  .option('--provider <github|gitlab>', 'Which host --org refers to.', 'github')
   .option('--root <path>', "Root directory to clone into (default: the config's first root).")
   .option('--include-archived', 'Also offer archived repos (skipped by default).')
   .option(...PACKAGES_OPTION)
@@ -168,16 +176,24 @@ program
   .addHelpText(
     'after',
     `
-Lists every repo under --org (via \`gh repo list\`), compares it against the
-directory names already found under the target root, and offers to clone
-whatever's missing. Archived repos are skipped by default (--include-archived
-to include them). \`--packages\` here means "only offer these repo names",
-same as everywhere else. Cloning into a root that isn't in your config yet
-still works — you're just reminded to run \`polyrepo setup\` afterward so
-\`list\`/\`doctor\`/etc. pick the new repos up too.
+Lists every repo under --org (via \`gh repo list\`, or \`glab repo list --group\`
+with \`--provider gitlab\`), compares it against the directory names already
+found under the target root, and offers to clone whatever's missing.
+Archived repos are skipped by default (--include-archived to include them).
+\`--packages\` here means "only offer these repo names", same as everywhere
+else. Cloning into a root that isn't in your config yet still works —
+you're just reminded to run \`polyrepo setup\` afterward so \`list\`/\`doctor\`/
+etc. pick the new repos up too.
+
+Unlike \`--org\`, \`--provider\` isn't about *which* GitHub org or GitLab group —
+it's about which of the two systems \`--org\` even means. There's no way to
+autodetect that the way other commands autodetect a local repo's host (see
+\`polyrepo doctor\`'s Environment section) — a repo that doesn't exist locally
+yet has no \`origin\` remote to look at.
 
 Examples:
   $ polyrepo clone --org my-github-org
+  $ polyrepo clone --org my-gitlab-group --provider gitlab
   $ polyrepo clone --org my-github-org --root "C:\\work\\NPM" --yes
   $ polyrepo clone --org my-github-org --dry-run
 `,
@@ -186,6 +202,7 @@ Examples:
     cloneCommand({
       configPath: program.opts().config,
       org: opts.org,
+      provider: opts.provider,
       root: opts.root,
       includeArchived: Boolean(opts.includeArchived),
       packages: opts.packages ? opts.packages.split(',') : undefined,
@@ -210,7 +227,7 @@ program
     `
 Read-only — safe to run any time. By default, for every package: local
 version, branch, git status (clean/dirty), whether the current version is
-tagged, whether that tag has a GitHub Release, whether the npm registry
+tagged, whether that tag has a release, whether the npm registry
 matches (or the registry version if it doesn't, or "unpublished"), and how
 many other local packages reference it with a now-stale dependency range
 (see \`polyrepo doctor\`). Everything (git, tag, release, npm) runs in parallel
@@ -300,15 +317,16 @@ Examples:
 
 program
   .command('prs')
-  .description('List open pull requests across every package.')
+  .description('List open pull/merge requests across every package.')
   .option(...PACKAGES_OPTION)
   .addHelpText(
     'after',
     `
-Read-only. Runs \`gh pr list\` for every package in parallel and prints one
-flat table: package, PR number, title, branch, draft status. Packages with
-no open PRs don't add any rows — useful after an interrupted \`polyrepo bump\`
-run to see which packages still have a PR waiting to be merged by hand.
+Read-only. Runs \`gh pr list\` (GitHub repos) or \`glab mr list\` (GitLab repos)
+for every package in parallel and prints one flat table: package, PR/MR
+number, title, branch, draft status. Packages with none open don't add any
+rows — useful after an interrupted \`polyrepo bump\` run to see which packages
+still have a PR/MR waiting to be merged by hand.
 
 Examples:
   $ polyrepo prs
@@ -335,33 +353,35 @@ program
 Seven sections. Most are read-only diagnosis; three include a small,
 non-destructive self-repair:
 
-  Environment           Node.js version, git/gh/npm on PATH and authenticated.
+  Environment           Node.js version, git/npm on PATH and authenticated,
+                        plus \`gh\` and/or \`glab\` — whichever your repos
+                        actually use (see "Multiple hosts" below).
   Config                how many packages the config resolves to; which are
                         dirty, in a detached HEAD state, or off their
                         default branch.
   Remote sync           compares each repo's locally cached default-branch
-                        name against what GitHub reports right now — git
-                        never refreshes that cache on its own, so a rename
-                        on GitHub would otherwise go unnoticed by every
-                        other command forever; drifted ones are fixed with
-                        \`git remote set-head origin --auto\`. Also runs
-                        \`git remote prune origin\` on every repo, dropping
-                        local refs for branches already deleted on GitHub.
-                        Both are pointer-only fixes — no file, branch, or
-                        commit is ever touched.
+                        name against what its host (GitHub or GitLab)
+                        reports right now — git never refreshes that cache
+                        on its own, so a rename on the host would otherwise
+                        go unnoticed by every other command forever;
+                        drifted ones are fixed with \`git remote set-head
+                        origin --auto\`. Also runs \`git remote prune origin\`
+                        on every repo, dropping local refs for branches
+                        already deleted on the host. Both are pointer-only
+                        fixes — no file, branch, or commit is ever touched.
   Branch sync           fetches and compares each repo's local default
                         branch against origin: diverged (needs manual
                         resolution), behind only (safe to fast-forward with
                         \`switch-default\`), or ahead only (unpushed local
                         commits) — surfaced before a command trips over it.
   Branch protection     whether each repo's default branch actually has
-                        GitHub branch protection enabled. Report-only —
-                        enabling protection is a policy choice, not
+                        branch protection enabled on its host. Report-only
+                        — enabling protection is a policy choice, not
                         something to set on your behalf.
-  Stale bump branches   \`bump\` merges through a PR with the branch left on
-                        origin (see \`bump\` above), so a local copy sticks
+  Stale bump branches   \`bump\` merges through a PR/MR with the branch left
+                        on origin (see \`bump\` above), so a local copy sticks
                         around too. Reports how many have an already-merged
-                        PR; \`--clean-branches\` turns that into a checkbox
+                        PR/MR; \`--clean-branches\` turns that into a checkbox
                         to delete the local ones you pick (\`git branch -d\`
                         — never the branch on origin, and refuses instead
                         of forcing if a branch isn't actually fully merged
@@ -369,8 +389,16 @@ non-destructive self-repair:
   Cross-package deps    does any local package's dependency range no longer
                         match another local package's current version.
 
+Multiple hosts: each repo's host (GitHub or GitLab) is detected from its
+\`origin\` remote — a folder can freely mix both. A self-hosted GitLab needs
+its hostname listed once in \`polyrepo setup\` (gitlab.com works with no
+setup); anything not recognized as GitLab is treated as GitHub, so nothing
+changes for a GitHub-only setup. The Environment section only checks \`gh\`
+if any discovered repo is on GitHub, and only checks \`glab\` if any is on
+GitLab.
+
 Run this first if any other command is behaving strangely, and any time
-you rename a branch on GitHub or want to check for accumulated cruft.
+you rename a branch on the host or want to check for accumulated cruft.
 
 Examples:
   $ polyrepo doctor
@@ -465,23 +493,29 @@ program
   )
   .option(...PACKAGES_OPTION)
   .option(...YES_OPTION)
-  .option('--wait-checks', 'Wait for CI checks on the PR (if any are configured) before merging; abort if they fail.')
+  .option('--wait-checks', 'Wait for CI checks (if any are configured) before merging; abort if they fail.')
   .addHelpText(
     'after',
     `
-Branch, PR, merge, and tag — no npm publish here, that's its own command
-(see \`polyrepo publish\`; for a GitHub Release from the resulting tag, see
-\`polyrepo release\`). Bumps the patch version by default; \`--minor\`/\`--major\`
-bump that part instead (resetting the parts below it to 0, same as any
-semver tool). Safe to re-run: if a previous attempt already pushed a
-branch, opened a PR, or even merged it, this picks up from there instead of
-failing or duplicating work. If the package has a CHANGELOG.md, a draft
-entry (Keep a Changelog style, seeded from the commit log since the last
-tag) is added to the same commit — review/edit it before merging if you
-want it polished. After every package is processed, any other local
-package whose dependencies/peerDependencies/devDependencies no longer
-match a bumped package's new version is reported (nothing is changed
-automatically).
+Branch, PR/MR, merge, and tag — no npm publish here, that's its own command
+(see \`polyrepo publish\`; for a release from the resulting tag, see
+\`polyrepo release\`). Works against GitHub or GitLab, autodetected per repo
+(see \`polyrepo doctor\`'s Environment section) — a mixed folder just works.
+Bumps the patch version by default; \`--minor\`/\`--major\` bump that part
+instead (resetting the parts below it to 0, same as any semver tool). Safe
+to re-run: if a previous attempt already pushed a branch, opened a PR/MR,
+or even merged it, this picks up from there instead of failing or
+duplicating work. If the package has a CHANGELOG.md, a draft entry (Keep a
+Changelog style, seeded from the commit log since the last tag) is added
+to the same commit — review/edit it before merging if you want it
+polished. After every package is processed, any other local package whose
+dependencies/peerDependencies/devDependencies no longer match a bumped
+package's new version is reported (nothing is changed automatically).
+
+\`--wait-checks\` on a GitLab repo waits on the branch's pipeline (\`glab ci
+status --branch --wait\`) rather than a PR-scoped check the way GitHub's
+\`gh pr checks --watch\` does — same idea, no CI configured just skips the
+wait either way.
 
 \`--prerelease\` bumps or starts a prerelease instead (\`--preid\` names it,
 default "alpha") — node-semver decides whether that means adding
@@ -571,19 +605,19 @@ program
   .option('--dry-run', 'Print every step without actually tagging, pushing, or releasing anything.')
   .option(...PACKAGES_OPTION)
   .option(...YES_OPTION)
-  .option('--release', 'After tagging, create a GitHub Release for each package just tagged, without asking.')
+  .option('--release', 'After tagging, create a release for each package just tagged, without asking.')
   .addHelpText(
     'after',
     `
 For a package whose version was bumped some other way (not through
 \`polyrepo bump\`, or before it started tagging) — puts the \`v<version>\` tag on
-its default branch's current tip, no version change and no PR, so
+its default branch's current tip, no version change and no PR/MR, so
 \`polyrepo release\` has something to work from. Re-syncs the default branch
 first for each package, same as \`bump\` does. Already-tagged packages are
 shown but unchecked by default
 (picking one anyway just confirms the tag is there, harmless). After
-tagging, asks whether to create a GitHub Release right away for whatever
-was just tagged (same as running \`polyrepo release\` for exactly those
+tagging, asks whether to create a release right away for whatever was
+just tagged (same as running \`polyrepo release\` for exactly those
 packages) — \`--release\` answers that yes without asking, for scripts.
 
 Examples:
@@ -604,7 +638,7 @@ Examples:
 
 program
   .command('release')
-  .description('Pick packages and create a GitHub Release for their current version\'s tag.')
+  .description("Pick packages and create a release for their current version's tag.")
   .option('--dry-run', 'Print what would be created, without actually creating any release.')
   .option(...PACKAGES_OPTION)
   .option(...YES_OPTION)
@@ -613,13 +647,16 @@ program
     `
 A release always targets the tag \`polyrepo bump\` (or \`polyrepo tag\`, for a version
 that was already correct) already created for the package's current
-version (\`v<version>\`, e.g. v1.2.10) — \`--verify-tag\` is passed to
-\`gh release create\` so it fails loudly instead of inventing one. Packages
+version (\`v<version>\`, e.g. v1.2.10) — the checkbox only offers packages
+that already have that tag ("run \`polyrepo bump\` first" otherwise), so
+this never invents one. On GitHub, \`--verify-tag\` is passed to
+\`gh release create\` as a second guarantee of the same thing. Packages
 with no tag yet for their current version show up disabled in the
-checkbox ("run \`polyrepo bump\` first"); ones already released are selectable
-but unchecked, in case you want to re-run it. Release notes come from the
-matching CHANGELOG.md section when there is one, otherwise from gh's own
---generate-notes (summarizing merged PRs/commits).
+checkbox; ones already released are selectable but unchecked, in case you
+want to re-run it. Release notes come from the matching CHANGELOG.md
+section when there is one — otherwise GitHub's own --generate-notes
+(summarizing merged PRs/commits), or, on GitLab (which has no equivalent),
+a plain commit-log listing since the last tag.
 
 Examples:
   $ polyrepo release                            See what's tagged but not released, then release it

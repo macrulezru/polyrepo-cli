@@ -3,19 +3,21 @@ import { confirm } from '@inquirer/prompts'
 import pc from 'picocolors'
 import { discoverRepos } from '../repos.js'
 import { loadConfig } from '../loadConfig.js'
-import { gh, git } from '../exec.js'
+import { git } from '../exec.js'
+import { providerByName } from '../providers/index.js'
 import { selectPackages } from '../selectPackages.js'
 import { heading, stepHeading, ok, fail, columnWidths, formatRow } from '../ui.js'
 
-// Diffs a GitHub org/user's repo list against what's already present under
-// one root directory, then clones whatever's missing. `--org` is taken
-// per-invocation rather than stored in polyrepo.config.json — the config's
-// roots/packages are about *where local repos live*, not which GitHub
-// account they come from, and one root can plausibly mix repos from
-// several accounts.
+// Diffs a GitHub org's (or GitLab group's) repo list against what's already
+// present under one root directory, then clones whatever's missing.
+// `--org`/`--provider` are taken per-invocation rather than stored in
+// polyrepo.config.json — the config's roots/packages are about *where
+// local repos live*, not which account/host they came from, and one root
+// can plausibly mix repos from several accounts or both providers.
 export async function cloneCommand({
   configPath,
   org,
+  provider: providerName = 'github',
   root,
   includeArchived = false,
   packages,
@@ -29,27 +31,22 @@ export async function cloneCommand({
     return
   }
 
-  heading(`Clone missing repos from ${org}`)
+  const provider = providerByName(providerName)
+  if (!provider) {
+    fail(`Unknown --provider "${providerName}" — expected "github" or "gitlab".`)
+    return
+  }
+
+  heading(`Clone missing repos from ${org} (${provider.name})`)
   console.log(pc.dim(`Target root: ${targetRoot}`))
 
-  const listResult = gh('.', ['repo', 'list', org, '--limit', '200', '--json', 'name,url,isArchived'], {
-    quiet: true,
-  })
+  const listResult = provider.listOrgRepos(org, { includeArchived })
   if (!listResult.ok) {
-    fail(`Could not list repos for "${org}" — is \`gh\` authenticated and the name correct?`)
+    fail(listResult.message)
     return
   }
 
-  let remoteRepos
-  try {
-    remoteRepos = JSON.parse(listResult.stdout)
-  } catch {
-    fail('Could not parse `gh repo list` output.')
-    return
-  }
-
-  if (!includeArchived) remoteRepos = remoteRepos.filter((r) => !r.isArchived)
-
+  const remoteRepos = listResult.repos
   const existing = new Set(discoverRepos({ roots: [targetRoot], packages: [] }).map((r) => r.dir.toLowerCase()))
   const missing = remoteRepos.filter((r) => !existing.has(r.name.toLowerCase()))
 
