@@ -118,7 +118,7 @@ export async function tagCommand({ configPath, packages, yes = false, dryRun = f
   let wantRelease = release
   if (!wantRelease && !yes) {
     wantRelease = await confirm({
-      message: `Create a GitHub Release for the ${ready.length} package(s) just tagged?`,
+      message: `Create a release for the ${ready.length} package(s) just tagged?`,
       default: true,
     })
   }
@@ -128,6 +128,6 @@ export async function tagCommand({ configPath, packages, yes = false, dryRun = f
   for (const repo of ready) {
     releaseIndex += 1
     stepHeading(releaseIndex, ready.length, `${repo.dir}  ${repo.tag}`)
-    releaseOne(repo, repo.tag, { dryRun })
+    releaseOne(repo, repo.tag, { dryRun, config })
   }
 }

@@ -2,7 +2,7 @@ import pc from 'picocolors'
 import { discoverRepos, inspectRepos } from '../repos.js'
 import { loadConfig } from '../loadConfig.js'
 import { tagName, tagExistsAsync } from '../tags.js'
-import { releaseExistsAsync } from '../release.js'
+import { providerFor } from '../providers/index.js'
 import { fetchPublishedVersionAsync } from '../registry.js'
 import { findStaleLocalDeps } from '../crossDeps.js'
 import { pMap } from '../pMap.js'
@@ -65,7 +65,8 @@ export async function listCommand({ configPath, quick = false, showPath = false,
     const withReleaseInfo = await pMap(rows, async (r) => {
       const tag = tagName(r.version)
       const [tagged, published] = await Promise.all([tagExistsAsync(r, tag), fetchPublishedVersionAsync(r)])
-      const released = tagged ? await releaseExistsAsync(r, tag) : false
+      const provider = tagged ? providerFor(r, config) : null
+      const released = provider ? await provider.releaseExistsAsync(r, tag) : false
       return { ...r, tag, tagged, released, published, staleDeps: staleByRepo.get(r.dir) ?? 0 }
     })
     registrySpinner.stop()

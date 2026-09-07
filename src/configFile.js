@@ -21,17 +21,23 @@ export function resolveConfigFilePath(configPath) {
 // file doesn't exist yet, so `polyrepo setup` can start from scratch at a new
 // --config path instead of erroring.
 export function readConfigFile(filePath) {
-  if (!fs.existsSync(filePath)) return { roots: [], packages: [] }
+  if (!fs.existsSync(filePath)) return { roots: [], packages: [], gitlabHosts: [] }
   const text = fs.readFileSync(filePath, 'utf8')
   const parsed = JSON.parse(text)
   return {
     roots: Array.isArray(parsed.roots) ? parsed.roots : [],
     packages: Array.isArray(parsed.packages) ? parsed.packages : [],
+    // Self-hosted GitLab instances live on arbitrary domains — there's no
+    // way to tell "some other git server" from "our corporate GitLab" by
+    // URL shape alone (see providers/detect.js), so those hosts have to be
+    // listed once, explicitly. `gitlab.com` itself is always recognized
+    // without needing to be listed here.
+    gitlabHosts: Array.isArray(parsed.gitlabHosts) ? parsed.gitlabHosts : [],
   }
 }
 
 export function writeConfigFile(filePath, data) {
-  const text = JSON.stringify({ roots: data.roots, packages: data.packages }, null, 2) + '\n'
+  const text = JSON.stringify({ roots: data.roots, packages: data.packages, gitlabHosts: data.gitlabHosts }, null, 2) + '\n'
   fs.mkdirSync(path.dirname(filePath), { recursive: true })
   fs.writeFileSync(filePath, text)
 }

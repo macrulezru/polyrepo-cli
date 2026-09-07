@@ -7,11 +7,10 @@ import { loadConfig } from '../loadConfig.js'
 import { bumpVersion, replaceVersionInText } from '../version.js'
 import { git } from '../exec.js'
 import { syncDefaultBranch } from '../defaultBranchSync.js'
-import { detectBumpState, createPr, mergePr } from '../github.js'
+import { providerFor } from '../providers/index.js'
 import { tagName, tagExists, createAndPushTag } from '../tags.js'
 import { describeRecentChangesForAll, formatRecentChanges, fullCommitLinesSince } from '../changes.js'
 import { hasChangelog, addChangelogEntry } from '../changelog.js'
-import { waitForChecks } from '../ciChecks.js'
 import { findStaleLocalDeps } from '../crossDeps.js'
 import { heading, stepHeading, ok, fail, warn, columnWidths, formatRow } from '../ui.js'
 import { selectPackages } from '../selectPackages.js'
@@ -96,7 +95,7 @@ export async function bumpCommand({
 
   if (!yes) {
     const proceed = await confirm({
-      message: `Bump ${selected.length} package(s), open a PR, and merge each into its default branch?${
+      message: `Bump ${selected.length} package(s), open a PR/MR, and merge each into its default branch?${
         dryRun ? ' (dry run — no changes will actually be pushed)' : ''
       }`,
       default: true,
@@ -111,16 +110,21 @@ export async function bumpCommand({
   for (const repo of selected) {
     index += 1
     stepHeading(index, selected.length, `${repo.dir}  ${repo.version} → ${repo.newVersion}`)
-    await bumpOne(repo, { dryRun, waitChecks })
+    await bumpOne(repo, { dryRun, waitChecks, config })
   }
 
   if (!dryRun) await reportStaleLocalDeps(config)
 }
 
-async function bumpOne(repo, { dryRun, waitChecks }) {
+async function bumpOne(repo, { dryRun, waitChecks, config }) {
   if (!repo.clean) {
     warn('Working tree is dirty — skipping to avoid committing unrelated changes.')
     return
+  }
+
+  const provider = providerFor(repo, config)
+  if (!provider) {
+    return fail('Could not determine a git host for this repo (no `origin` remote?) — skipping the PR/MR/tag steps.')
   }
 
   const syncResult = syncDefaultBranch(repo)
@@ -128,14 +132,15 @@ async function bumpOne(repo, { dryRun, waitChecks }) {
   ok(`${repo.defaultBranch} is up to date.`)
 
   const branchName = bumpBranchName(repo.newVersion)
-  const state = detectBumpState(repo, branchName)
+  const state = provider.detectBumpState(repo, branchName)
 
   if (dryRun) {
     if (state.status === 'merged') {
-      ok(`[dry-run] Already merged as PR #${state.pr.number} — would only ensure the tag exists.`)
+      ok(`[dry-run] Already merged as ${provider.requestLabel} #${state.pr.number} — would only ensure the tag exists.`)
     } else {
       const verb = state.status === 'fresh' ? 'create' : 'reuse'
-      const prVerb = state.status === 'open' ? `merge existing PR #${state.pr.number}` : 'open + merge a PR'
+      const prVerb =
+        state.status === 'open' ? `merge existing ${provider.requestLabel} #${state.pr.number}` : `open + merge a ${provider.requestLabel}`
       const waitNote = waitChecks ? ', waiting for CI checks first' : ''
       console.log(
         pc.magenta(
@@ -149,8 +154,8 @@ async function bumpOne(repo, { dryRun, waitChecks }) {
   let prNumber = state.status === 'merged' || state.status === 'open' ? state.pr.number : null
 
   if (state.status !== 'merged') {
-    if (state.status === 'open') ok(`Found existing open PR #${state.pr.number} for ${branchName} — reusing it.`)
-    if (state.status === 'branch') ok(`Found existing branch ${branchName} on origin without a PR — reusing it.`)
+    if (state.status === 'open') ok(`Found existing open ${provider.requestLabel} #${state.pr.number} for ${branchName} — reusing it.`)
+    if (state.status === 'branch') ok(`Found existing branch ${branchName} on origin without a ${provider.requestLabel} — reusing it.`)
 
     const checkoutResult = checkoutBumpBranch(repo, branchName)
     if (!checkoutResult.ok) return fail(`Could not check out branch ${branchName}.`)
@@ -183,33 +188,33 @@ async function bumpOne(repo, { dryRun, waitChecks }) {
     ok('Branch pushed (or already up to date on origin).')
 
     if (state.status !== 'open') {
-      const prResult = createPr(repo, {
+      const prResult = provider.createPr(repo, {
         base: repo.defaultBranch,
         branch: branchName,
         title: `chore: bump version to ${repo.newVersion}`,
         body: `Bump version: ${repo.version} → ${repo.newVersion}.`,
       })
-      if (!prResult.ok) return fail(prResult.message ?? 'gh pr create failed.')
+      if (!prResult.ok) return fail(prResult.message ?? `${provider.cli} create failed.`)
       prNumber = prResult.number
-      ok(`Opened PR #${prNumber}.`)
+      ok(`Opened ${provider.requestLabel} #${prNumber}.`)
     }
 
     if (waitChecks) {
-      const checksResult = waitForChecks(repo, prNumber)
+      const checksResult = provider.waitForChecks(repo, { number: prNumber, branch: branchName })
       if (!checksResult.ok) return fail(checksResult.message)
       ok(checksResult.skipped ? 'No CI checks reported — nothing to wait for.' : 'CI checks passed.')
     }
 
-    if (!mergePr(repo, prNumber).ok) {
-      return fail(`gh pr merge failed — PR #${prNumber} is still open, merge it manually.`)
+    if (!provider.mergePr(repo, prNumber).ok) {
+      return fail(`${provider.cli} merge failed — ${provider.requestLabel} #${prNumber} is still open, merge it manually.`)
     }
-    ok(`Merged PR #${prNumber}.`)
+    ok(`Merged ${provider.requestLabel} #${prNumber}.`)
 
     const resyncResult = syncDefaultBranch(repo)
     if (!resyncResult.ok) return fail(resyncResult.message)
     ok(`Local ${repo.defaultBranch} synced to origin at ${repo.newVersion}.`)
   } else {
-    ok(`Already merged as PR #${state.pr.number} — ${repo.defaultBranch} already has it.`)
+    ok(`Already merged as ${provider.requestLabel} #${state.pr.number} — ${repo.defaultBranch} already has it.`)
   }
 
   const tag = tagName(repo.newVersion)

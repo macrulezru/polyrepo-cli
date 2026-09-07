@@ -18,12 +18,15 @@ export async function setupCommand({ configPath } = {}) {
     printEntries('roots (subfolders are scanned as packages)', data.roots, describeRoot)
     console.log('')
     printEntries('packages (the folder itself is the package)', data.packages, describePackage)
+    console.log('')
+    printEntries('gitlabHosts (self-hosted GitLab instances — gitlab.com always works)', data.gitlabHosts, (h) => h)
 
     const choices = [
       { name: 'Add a root directory', value: 'add-root' },
       { name: 'Add a single package directory', value: 'add-package' },
+      { name: 'Add a self-hosted GitLab host', value: 'add-gitlab-host' },
     ]
-    if (data.roots.length + data.packages.length > 0) {
+    if (data.roots.length + data.packages.length + data.gitlabHosts.length > 0) {
       choices.push(
         { name: 'Edit an entry', value: 'edit' },
         { name: 'Remove an entry', value: 'remove' },
@@ -48,12 +51,20 @@ export async function setupCommand({ configPath } = {}) {
         data.packages.push(value)
         dirty = true
       }
+    } else if (action === 'add-gitlab-host') {
+      const value = await promptHost('Self-hosted GitLab hostname (no scheme, e.g. gitlab.company.com):')
+      if (value) {
+        data.gitlabHosts.push(value)
+        dirty = true
+      }
     } else if (action === 'edit') {
       const picked = await pickEntry(data)
       if (picked) {
         const current = data[picked.kind][picked.index]
-        const label = picked.kind === 'roots' ? 'root' : 'package directory'
-        const value = await promptPath(`New value for this ${label}:`, current)
+        const value =
+          picked.kind === 'gitlabHosts'
+            ? await promptHost('New hostname:', current)
+            : await promptPath(`New value for this ${picked.kind === 'roots' ? 'root' : 'package directory'}:`, current)
         if (value) {
           data[picked.kind][picked.index] = value
           dirty = true
@@ -111,10 +122,19 @@ async function promptPath(message, defaultValue) {
   return trimmed
 }
 
+// No existence check (unlike promptPath) — a hostname isn't a local path,
+// there's nothing on disk to look for.
+async function promptHost(message, defaultValue) {
+  const value = await input({ message, default: defaultValue })
+  const trimmed = value.trim().toLowerCase()
+  return trimmed || null
+}
+
 async function pickEntry(data) {
   const choices = [
     ...data.roots.map((p, i) => ({ name: `[root] ${p}`, value: { kind: 'roots', index: i } })),
     ...data.packages.map((p, i) => ({ name: `[package] ${p}`, value: { kind: 'packages', index: i } })),
+    ...data.gitlabHosts.map((h, i) => ({ name: `[gitlabHost] ${h}`, value: { kind: 'gitlabHosts', index: i } })),
     { name: 'Cancel', value: null },
   ]
   return select({ message: 'Which entry?', choices, theme: promptTheme })

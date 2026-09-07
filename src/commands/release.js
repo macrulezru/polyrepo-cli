@@ -3,7 +3,7 @@ import pc from 'picocolors'
 import { discoverRepos, inspectRepos } from '../repos.js'
 import { loadConfig } from '../loadConfig.js'
 import { tagName, tagExists } from '../tags.js'
-import { releaseExistsAsync, createRelease } from '../release.js'
+import { providerFor } from '../providers/index.js'
 import { extractChangelogSection } from '../changelog.js'
 import { selectPackages } from '../selectPackages.js'
 import { filterByNames } from '../filterByNames.js'
@@ -18,7 +18,7 @@ export async function releaseCommand({ configPath, packages, yes = false, dryRun
     return
   }
 
-  heading('GitHub releases')
+  heading('Releases')
 
   // Narrowed to --packages up front (a no-op when it wasn't given) — no
   // reason to check, or print the tag/release status of, packages nobody
@@ -36,7 +36,8 @@ export async function releaseCommand({ configPath, packages, yes = false, dryRun
   const withStatus = await pMap(repos, async (r) => {
     const tag = tagName(r.version)
     const tagged = tagExists(r, tag)
-    const released = tagged ? await releaseExistsAsync(r, tag) : false
+    const provider = tagged ? providerFor(r, config) : null
+    const released = provider ? await provider.releaseExistsAsync(r, tag) : false
     const status = !tagged ? 'no-tag' : released ? 'released' : 'ready'
     const statusText = status === 'no-tag' ? 'not tagged yet' : status === 'released' ? 'already released' : 'ready'
     console.log(pc.dim(`  ${r.dir}: ${tag} — ${statusText}`))
@@ -108,20 +109,25 @@ export async function releaseCommand({ configPath, packages, yes = false, dryRun
       continue
     }
 
-    releaseOne(repo, repo.tag, { dryRun })
+    releaseOne(repo, repo.tag, { dryRun, config })
   }
 }
 
 // Also used by `polyrepo tag` to offer "release what I just tagged" right after
 // tagging, without making that command build its own checkbox/confirm and
 // re-discover which packages are release-ready — it already knows exactly.
-export function releaseOne(repo, tag, { dryRun } = {}) {
+export function releaseOne(repo, tag, { dryRun, config } = {}) {
+  const provider = providerFor(repo, config)
+  if (!provider) {
+    return fail('Could not determine a git host for this repo (no `origin` remote?) — skipping the release.')
+  }
+
   const notes = extractChangelogSection(repo, repo.version)
   const title = `${repo.name}@${repo.version}`
-  ok(notes ? 'Using the matching CHANGELOG.md section as release notes.' : 'No changelog entry — using --generate-notes.')
+  ok(notes ? 'Using the matching CHANGELOG.md section as release notes.' : `No changelog entry — using ${provider.name === 'github' ? '--generate-notes' : 'a commit-log summary'}.`)
 
-  const result = createRelease(repo, { tag, title, notes, dryRun })
-  if (!result.ok) fail(`gh release create failed (exit ${result.status}).`)
+  const result = provider.createRelease(repo, { tag, title, notes, dryRun })
+  if (!result.ok) fail(`${provider.cli} release create failed (exit ${result.status}).`)
   else ok(`Created release ${title}.`)
 }
 

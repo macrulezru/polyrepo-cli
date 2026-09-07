@@ -1,7 +1,7 @@
 import pc from 'picocolors'
 import { discoverRepos } from '../repos.js'
 import { loadConfig } from '../loadConfig.js'
-import { ghAsync } from '../exec.js'
+import { providerFor } from '../providers/index.js'
 import { pMap } from '../pMap.js'
 import { heading, printTable } from '../ui.js'
 import { startSpinner } from '../spinner.js'
@@ -15,39 +15,28 @@ export async function prsCommand({ configPath, packages } = {}) {
     return
   }
 
-  heading('Open pull requests')
+  heading('Open pull/merge requests')
 
-  const spinner = startSpinner(`Checking ${repos.length} package(s) for open pull requests...`)
+  const spinner = startSpinner(`Checking ${repos.length} package(s) for open pull/merge requests...`)
   const results = await pMap(repos, async (r) => {
-    const result = await ghAsync(r.path, [
-      'pr',
-      'list',
-      '--state',
-      'open',
-      '--json',
-      'number,title,headRefName,isDraft',
-    ])
-    if (!result.ok || !result.stdout) return { repo: r, prs: [] }
-    try {
-      return { repo: r, prs: JSON.parse(result.stdout) }
-    } catch {
-      return { repo: r, prs: [] }
-    }
+    const provider = providerFor(r, config)
+    if (!provider) return { repo: r, prs: [] }
+    return { repo: r, prs: await provider.listOpenPrsAsync(r), requestLabel: provider.requestLabel }
   })
   spinner.stop()
 
-  const rows = results.flatMap(({ repo, prs }) =>
+  const rows = results.flatMap(({ repo, prs, requestLabel }) =>
     prs.map((pr) => ({
       dir: repo.dir,
-      number: `#${pr.number}`,
+      number: `${requestLabel} #${pr.number}`,
       title: pr.title.length > 50 ? `${pr.title.slice(0, 47)}...` : pr.title,
-      branch: pr.headRefName,
+      branch: pr.branch,
       draft: pr.isDraft,
     })),
   )
 
   if (rows.length === 0) {
-    console.log(pc.green('No open pull requests.'))
+    console.log(pc.green('No open pull/merge requests.'))
     return
   }
 
@@ -55,7 +44,7 @@ export async function prsCommand({ configPath, packages } = {}) {
     rows,
     [
       { label: 'Package', value: (r) => r.dir },
-      { label: 'PR', value: (r) => r.number, style: (r, t) => pc.dim(t) },
+      { label: 'PR/MR', value: (r) => r.number, style: (r, t) => pc.dim(t) },
       { label: 'Title', value: (r) => r.title },
       { label: 'Branch', value: (r) => r.branch, style: (r, t) => pc.dim(t) },
       { label: 'Status', value: (r) => (r.draft ? 'draft' : ''), style: (r, t) => pc.yellow(t) },
