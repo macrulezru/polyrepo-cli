@@ -17,13 +17,24 @@ import { heading, stepHeading, ok, fail, warn, columnWidths, formatRow } from '.
 import { selectPackages } from '../selectPackages.js'
 import { startSpinner } from '../spinner.js'
 
+function bumpTypeLabel(bumpType, { preid, customVersion } = {}) {
+  if (bumpType === 'custom') return `custom → ${customVersion}`
+  if (bumpType === 'premajor') return `premajor, ${preid}`
+  if (bumpType === 'preminor') return `preminor, ${preid}`
+  if (bumpType === 'prepatch') return `prepatch, ${preid}`
+  if (bumpType === 'prerelease') return `prerelease, ${preid}`
+  return bumpType
+}
+
 export async function bumpCommand({
   dryRun = false,
   configPath,
   packages, // string[] of dir names — skips the checkbox when given
   yes = false, // skip the "proceed?" confirmation
   waitChecks = false, // wait for CI checks (if any) before merging each PR
-  bumpType = 'patch', // 'patch' | 'minor' | 'major'
+  bumpType = 'patch', // 'patch' | 'minor' | 'major' | 'premajor' | 'preminor' | 'prepatch' | 'prerelease' | 'custom'
+  preid, // prerelease identifier (e.g. 'alpha') for the 'pre*'/'prerelease' bump types
+  customVersion, // exact version to set, for bumpType 'custom'
 } = {}) {
   const config = loadConfig({ configPath })
   const discovered = discoverRepos(config)
@@ -32,7 +43,8 @@ export async function bumpCommand({
     return
   }
 
-  heading(`Bump version (${bumpType})`)
+  const bumpOptions = { preid, customVersion }
+  heading(`Bump version (${bumpTypeLabel(bumpType, bumpOptions)})`)
 
   const scanSpinner = startSpinner(`Checking ${discovered.length} package(s)...`)
   const allRepos = await inspectRepos(discovered)
@@ -44,7 +56,7 @@ export async function bumpCommand({
     return
   }
 
-  const withTarget = repos.map((r) => ({ ...r, newVersion: bumpVersion(r.version, bumpType) }))
+  const withTarget = repos.map((r) => ({ ...r, newVersion: bumpVersion(r.version, bumpType, bumpOptions) }))
 
   // Only worth computing when the checkbox is actually going to be shown —
   // a --packages run never displays it, so skip the (parallel, but still

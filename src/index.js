@@ -14,6 +14,7 @@ import { releaseCommand } from './commands/release.js'
 import { setupCommand } from './commands/setup.js'
 import { execCommand } from './commands/exec.js'
 import { outdatedCommand } from './commands/outdated.js'
+import { auditCommand } from './commands/audit.js'
 import { prsCommand } from './commands/prs.js'
 import { cloneCommand } from './commands/clone.js'
 
@@ -94,7 +95,7 @@ function wrapText(text, width) {
 program
   .name('polyrepo')
   .description(
-    'Manage local npm package repos: pick which directories to scan (setup), clone missing ones from GitHub (clone), see their state (list), outdated dependencies (outdated), or open PRs (prs), run a health check (doctor), keep them on an up-to-date default branch (switch-default), release a version through a PR (bump), publish to npm (publish), tag an already-current version (tag), create GitHub Releases (release), or run any command across every repo (exec).',
+    'Manage local npm package repos: pick which directories to scan (setup), clone missing ones from GitHub (clone), see their state (list), outdated dependencies (outdated), security vulnerabilities (audit), or open PRs (prs), run a health check (doctor), keep them on an up-to-date default branch (switch-default), release a version through a PR (bump), publish to npm (publish), tag an already-current version (tag), create GitHub Releases (release), or run any command across every repo (exec).',
   )
   .version(CLI_VERSION)
   .option(
@@ -123,6 +124,7 @@ Examples:
   $ polyrepo doctor                             Check environment, auth, and dependency drift
   $ polyrepo list                               Show version + branch for every package
   $ polyrepo outdated                           Show outdated dependencies across every package
+  $ polyrepo audit                              Show npm security vulnerabilities across every package
   $ polyrepo prs                                List open pull requests across every package
   $ polyrepo switch-default                     Update selected repos to their latest default branch
   $ polyrepo bump --dry-run                     Preview a version bump, nothing is pushed
@@ -263,6 +265,34 @@ Examples:
   )
   .action((opts) =>
     outdatedCommand({
+      configPath: program.opts().config,
+      packages: opts.packages ? opts.packages.split(',') : undefined,
+    }),
+  )
+
+program
+  .command('audit')
+  .description('Show npm security vulnerabilities across every package (npm audit).')
+  .option(...PACKAGES_OPTION)
+  .addHelpText(
+    'after',
+    `
+Read-only. Runs \`npm audit --json\` for every package in parallel and prints
+one flat table: package, dependency, severity (critical/high/moderate/low),
+whether it's a direct or transitive dependency, and whether a fix is
+available (and at what version, if that fix would mean a semver-major bump
+of a top-level dependency). Packages with nothing found don't add any rows.
+\`--packages\` here just narrows which packages are checked — there's no
+checkbox, nothing to confirm, and nothing is changed; for that, fix the
+version by hand or re-run \`polyrepo outdated\`/\`npm audit fix\` yourself.
+
+Examples:
+  $ polyrepo audit
+  $ polyrepo audit --packages vue-toast-kit,os-detect
+`,
+  )
+  .action((opts) =>
+    auditCommand({
       configPath: program.opts().config,
       packages: opts.packages ? opts.packages.split(',') : undefined,
     }),
@@ -421,6 +451,18 @@ program
   .option('--dry-run', 'Print every step without pushing, opening, merging, or tagging anything for real.')
   .option('--minor', 'Bump the minor version instead of patch (e.g. 1.2.9 → 1.3.0).')
   .option('--major', 'Bump the major version instead of patch (e.g. 1.2.9 → 2.0.0).')
+  .option(
+    '--prerelease',
+    'Bump (or start) a prerelease instead of patch/minor/major (e.g. 1.2.9 → 1.2.10-alpha.0, or 1.2.10-alpha.0 → 1.2.10-alpha.1). Combine with --preid to name it.',
+  )
+  .option(
+    '--preid <name>',
+    'Prerelease identifier for --prerelease, or combined with --minor/--major for a preminor/premajor prerelease (e.g. --major --preid beta → 2.0.0-beta.0). Defaults to "alpha".',
+  )
+  .option(
+    '--custom-version <version>',
+    'Set an exact version instead of computing one. Requires --packages with exactly one package.',
+  )
   .option(...PACKAGES_OPTION)
   .option(...YES_OPTION)
   .option('--wait-checks', 'Wait for CI checks on the PR (if any are configured) before merging; abort if they fail.')
@@ -441,27 +483,56 @@ package whose dependencies/peerDependencies/devDependencies no longer
 match a bumped package's new version is reported (nothing is changed
 automatically).
 
+\`--prerelease\` bumps or starts a prerelease instead (\`--preid\` names it,
+default "alpha") — node-semver decides whether that means adding
+\`-alpha.0\` to the current version or advancing an existing prerelease's
+number. Pairing \`--preid\` with \`--minor\`/\`--major\` instead starts a
+preminor/premajor prerelease (e.g. \`--major --preid beta\` on 1.2.9 →
+2.0.0-beta.0). \`--custom-version\` skips computing a version entirely and
+sets exactly what you give it — only allowed with \`--packages\` naming a
+single package, since applying one literal version to several packages at
+once is never actually what you want.
+
 Examples:
   $ polyrepo bump --dry-run                     See the plan, nothing changes
   $ polyrepo bump                               Interactive: checkbox + confirm, patch bump
   $ polyrepo bump --minor                       Interactive minor bump
+  $ polyrepo bump --prerelease --preid beta     Bump/start a beta prerelease
+  $ polyrepo bump --major --preid rc            Start a premajor rc prerelease (e.g. 2.0.0-rc.0)
+  $ polyrepo bump --packages a --custom-version 3.0.0-hotfix.1   Set an exact version for one package
   $ polyrepo bump --wait-checks                 Wait for CI to go green before merging
   $ polyrepo bump --packages a,b --yes          Non-interactive, for scripts/CI
 `,
   )
   .action((opts) => {
-    if (opts.minor && opts.major) {
-      console.error('Cannot combine --minor and --major — pick one.')
+    const shapeFlags = [opts.minor, opts.major, opts.prerelease, opts.customVersion].filter(Boolean)
+    if (shapeFlags.length > 1) {
+      console.error('Pick only one of --minor, --major, --prerelease, or --custom-version.')
       process.exitCode = 1
       return
     }
+    if (opts.customVersion && (opts.packages ?? '').split(',').filter(Boolean).length !== 1) {
+      console.error('--custom-version requires --packages with exactly one package.')
+      process.exitCode = 1
+      return
+    }
+
+    let bumpType = 'patch'
+    if (opts.customVersion) bumpType = 'custom'
+    else if (opts.prerelease) bumpType = 'prerelease'
+    else if (opts.major) bumpType = opts.preid ? 'premajor' : 'major'
+    else if (opts.minor) bumpType = opts.preid ? 'preminor' : 'minor'
+    else if (opts.preid) bumpType = 'prerelease'
+
     return bumpCommand({
       dryRun: Boolean(opts.dryRun),
       configPath: program.opts().config,
       packages: opts.packages ? opts.packages.split(',') : undefined,
       yes: Boolean(opts.yes),
       waitChecks: Boolean(opts.waitChecks),
-      bumpType: opts.major ? 'major' : opts.minor ? 'minor' : 'patch',
+      bumpType,
+      preid: bumpType.startsWith('pre') ? opts.preid || 'alpha' : undefined,
+      customVersion: opts.customVersion,
     })
   })
 

@@ -20,6 +20,9 @@ with `--dry-run` before anything actually changes.
   saves the same table as Markdown, JSON, CSV, HTML, or plain text.
 - **`outdated`** — one table across every package of what's outdated
   (`npm outdated`), instead of running it in each repo by hand.
+- **`audit`** — one table across every package of npm security
+  vulnerabilities (`npm audit`), grouped by package and colored by
+  severity, with whether a fix is available.
 - **`prs`** — one table of every open pull request across every
   package (`gh pr list`) — useful after an interrupted `bump` run to
   see what's still waiting to be merged.
@@ -36,12 +39,13 @@ with `--dry-run` before anything actually changes.
   a dirty repo to match origin; add `--clean` to also wipe untracked
   files/directories.
 - **`bump`** — bump a package's version (patch by default, or
-  `--minor`/`--major`) through a branch → PR → merge, then tag the
-  release. Safe to re-run if a previous attempt was interrupted
-  partway — it picks up from wherever it left off instead of failing
-  or duplicating work. Can wait for CI checks before merging
-  (`--wait-checks`), and drafts a `CHANGELOG.md` entry when the
-  package already has one.
+  `--minor`/`--major`; `--prerelease`/`--preid` to start or advance a
+  prerelease; `--custom-version` for an exact version) through a
+  branch → PR → merge, then tag the release. Safe to re-run if a
+  previous attempt was interrupted partway — it picks up from wherever
+  it left off instead of failing or duplicating work. Can wait for CI
+  checks before merging (`--wait-checks`), and drafts a
+  `CHANGELOG.md` entry when the package already has one.
 - **`publish`** — run `npm publish` for the packages that are actually
   ahead of the registry, after comparing each one automatically.
 - **`tag`** — tag a package at its *current* version without bumping
@@ -162,6 +166,25 @@ color-value-tools         1.1.12   master  clean  v1.1.12  ✓        ✓    ✓
 css-magic-gradient        1.2.14   master  clean  v1.2.14  ✓        ✓    ✓
 os-detect                 2.1.5    master  clean  v2.1.5   ✓        ✓    ✓
 …
+```
+
+`polyrepo audit` — npm security vulnerabilities across every package,
+sorted by severity, with whether a fix is available:
+
+```
+9 vulnerabilities across 1 package(s), 6 of them critical/high severity
+
+Package    Dependency       Severity  Type        Fix available
+---------  ---------------  --------  ----------  -------------
+os-detect  brace-expansion  high      transitive  yes
+os-detect  browserslist     high      transitive  yes
+os-detect  js-yaml          high      transitive  yes
+os-detect  nanoid           high      transitive  yes
+os-detect  postcss          high      transitive  yes
+os-detect  ws               high      transitive  yes
+os-detect  @humanfs/node    moderate  transitive  yes
+os-detect  @babel/core      low       transitive  yes
+os-detect  esbuild          low       transitive  yes
 ```
 
 `polyrepo switch-default --force` — hard-resetting a repo with an
