@@ -1,8 +1,8 @@
 import { confirm } from '@inquirer/prompts'
 import pc from 'picocolors'
-import { discoverRepos, inspectRepos } from '../repos.js'
+import { discoverPackages, inspectRepos } from '../repos.js'
 import { loadConfig } from '../loadConfig.js'
-import { tagName, tagExists } from '../tags.js'
+import { tagFor, tagExists } from '../tags.js'
 import { providerFor } from '../providers/index.js'
 import { extractChangelogSection } from '../changelog.js'
 import { selectPackages } from '../selectPackages.js'
@@ -12,7 +12,7 @@ import { heading, stepHeading, ok, fail, columnWidths, formatRow } from '../ui.j
 
 export async function releaseCommand({ configPath, packages, yes = false, dryRun = false } = {}) {
   const config = loadConfig({ configPath })
-  const allRepos = (await inspectRepos(discoverRepos(config))).filter((r) => r.version)
+  const allRepos = (await inspectRepos(discoverPackages(config))).filter((r) => r.version)
   if (allRepos.length === 0) {
     console.log(pc.yellow('No repos found.'))
     return
@@ -34,7 +34,7 @@ export async function releaseCommand({ configPath, packages, yes = false, dryRun
   // creates. No tag for the current version means there's nothing to
   // release yet; a tag with no release is exactly what this command is for.
   const withStatus = await pMap(repos, async (r) => {
-    const tag = tagName(r.version)
+    const tag = tagFor(r)
     const tagged = tagExists(r, tag)
     const provider = tagged ? providerFor(r, config) : null
     const released = provider ? await provider.releaseExistsAsync(r, tag) : false

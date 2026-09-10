@@ -1,7 +1,7 @@
 import pc from 'picocolors'
-import { discoverRepos, inspectRepos } from '../repos.js'
+import { discoverPackages, inspectRepos } from '../repos.js'
 import { loadConfig } from '../loadConfig.js'
-import { tagName, tagExistsAsync } from '../tags.js'
+import { tagFor, tagExistsAsync } from '../tags.js'
 import { providerFor } from '../providers/index.js'
 import { fetchPublishedVersionAsync } from '../registry.js'
 import { findStaleLocalDeps } from '../crossDeps.js'
@@ -21,7 +21,7 @@ export async function listCommand({ configPath, quick = false, showPath = false,
   }
 
   const config = loadConfig({ configPath })
-  const repos = discoverRepos(config)
+  const repos = discoverPackages(config)
   if (repos.length === 0) {
     console.log(pc.yellow('No repos found.'))
     return
@@ -63,8 +63,14 @@ export async function listCommand({ configPath, quick = false, showPath = false,
 
     const registrySpinner = startSpinner(`Checking ${rows.length} package(s) for tags, releases, and the registry...`)
     const withReleaseInfo = await pMap(rows, async (r) => {
-      const tag = tagName(r.version)
-      const [tagged, published] = await Promise.all([tagExistsAsync(r, tag), fetchPublishedVersionAsync(r)])
+      const tag = tagFor(r)
+      // A private package (workspace root, or a member like a playground
+      // app) is never published — skip the registry round trip for it
+      // rather than reporting a misleading "unpublished".
+      const [tagged, published] = await Promise.all([
+        tagExistsAsync(r, tag),
+        r.private ? Promise.resolve(null) : fetchPublishedVersionAsync(r),
+      ])
       const provider = tagged ? providerFor(r, config) : null
       const released = provider ? await provider.releaseExistsAsync(r, tag) : false
       return { ...r, tag, tagged, released, published, staleDeps: staleByRepo.get(r.dir) ?? 0 }
@@ -84,8 +90,8 @@ export async function listCommand({ configPath, quick = false, showPath = false,
       },
       {
         label: 'npm',
-        value: (r) => (r.published == null ? 'unpublished' : r.published === r.version ? '✓' : r.published),
-        style: (r, text) => (r.published === r.version ? pc.green(text) : pc.yellow(text)),
+        value: (r) => (r.private ? 'private' : r.published == null ? 'unpublished' : r.published === r.version ? '✓' : r.published),
+        style: (r, text) => (r.private ? pc.dim(text) : r.published === r.version ? pc.green(text) : pc.yellow(text)),
       },
       {
         label: 'Deps',

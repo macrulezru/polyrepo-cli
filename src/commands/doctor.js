@@ -1,6 +1,6 @@
 import { checkbox, confirm } from '@inquirer/prompts'
 import pc from 'picocolors'
-import { discoverRepos, inspectRepos } from '../repos.js'
+import { discoverRepos, discoverPackages, inspectRepos } from '../repos.js'
 import { loadConfig } from '../loadConfig.js'
 import { run, git, gitAsync } from '../exec.js'
 import { findStaleLocalDeps } from '../crossDeps.js'
@@ -86,7 +86,13 @@ export async function doctorCommand({ configPath, cleanBranches = false } = {}) 
 
   heading('Cross-package dependencies')
   if (repos.length > 0) {
-    const issues = findStaleLocalDeps(repos)
+    // Unlike every other section above (repo-level: one git working tree,
+    // one branch, one PR list), a dependency range is declared per npm
+    // package — a monorepo's own members need to be expanded here even
+    // though the rest of this command deliberately stays at repo
+    // granularity (see discoverPackages in repos.js).
+    const packages = await inspectRepos(discoverPackages(config))
+    const issues = findStaleLocalDeps(packages)
     if (issues.length === 0) {
       ok('No stale local dependency references found.')
     } else {

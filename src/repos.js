@@ -3,6 +3,7 @@ import path from 'node:path'
 import pc from 'picocolors'
 import { gitAsync } from './exec.js'
 import { pMap } from './pMap.js'
+import { pnpmWorkspaceGlobs, resolveWorkspaceMembers } from './workspaces.js'
 
 export function isRepo(dirPath) {
   return fs.existsSync(path.join(dirPath, 'package.json')) && fs.existsSync(path.join(dirPath, '.git'))
@@ -102,14 +103,56 @@ export function discoverRepos(config) {
   return repos
 }
 
+// One entry per discoverRepos() result normally — but a pnpm workspace repo
+// (a pnpm-workspace.yaml that resolves to at least one member with its own
+// package.json) expands into one entry per member instead of the repo
+// root's own package.json, which for a workspace is typically just a
+// private, unpublishable manifest (e.g. a real-world example: root "inview"
+// is private, the actual publishable packages live under packages/*). Every
+// command that deals with individual npm packages (list, outdated, audit,
+// bump, publish, tag, release, exec) reads through this instead of
+// discoverRepos directly. Repo-level commands (switch-default, doctor, prs,
+// clone) keep using discoverRepos — a git checkout, branch sync, or PR list
+// only makes sense once per physical repo, not once per package living
+// inside it, so expanding those would just show the same repo N times.
+export function discoverPackages(config) {
+  const repos = discoverRepos(config)
+  const packages = []
+
+  for (const repo of repos) {
+    const globs = pnpmWorkspaceGlobs(repo.path)
+    const members = globs ? resolveWorkspaceMembers(repo.path, globs) : []
+
+    if (members.length === 0) {
+      packages.push({ ...repo, isWorkspaceMember: false, repoDir: repo.dir, repoPath: repo.path })
+      continue
+    }
+
+    for (const member of members) {
+      packages.push({
+        dir: `${repo.dir}/${member.relDir}`,
+        path: member.absDir,
+        pkgPath: member.pkgPath,
+        isWorkspaceMember: true,
+        repoDir: repo.dir,
+        repoPath: repo.path,
+      })
+    }
+  }
+
+  return packages
+}
+
 export function readPackageJson(repo) {
   const text = fs.readFileSync(repo.pkgPath, 'utf8')
   const nameMatch = text.match(/"name"\s*:\s*"([^"]+)"/)
   const versionMatch = text.match(/"version"\s*:\s*"([^"]+)"/)
+  const privateMatch = text.match(/"private"\s*:\s*(true|false)/)
   return {
     text,
     name: nameMatch ? nameMatch[1] : repo.dir,
     version: versionMatch ? versionMatch[1] : null,
+    private: privateMatch ? privateMatch[1] === 'true' : false,
   }
 }
 

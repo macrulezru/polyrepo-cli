@@ -1,6 +1,6 @@
 import semver from 'semver'
 import pc from 'picocolors'
-import { discoverRepos, inspectRepos } from '../repos.js'
+import { discoverPackages, inspectRepos } from '../repos.js'
 import { loadConfig } from '../loadConfig.js'
 import { npmAsync } from '../exec.js'
 import { pMap } from '../pMap.js'
@@ -28,7 +28,7 @@ const SEVERITY_COLOR = { major: pc.red, minor: pc.yellow, patch: pc.dim }
 
 export async function outdatedCommand({ configPath, packages } = {}) {
   const config = loadConfig({ configPath })
-  const repos = filterByNames((await inspectRepos(discoverRepos(config))).filter((r) => r.version), packages)
+  const repos = filterByNames((await inspectRepos(discoverPackages(config))).filter((r) => r.version), packages)
   if (repos.length === 0) {
     console.log(pc.yellow('No repos found.'))
     return

@@ -1,9 +1,9 @@
 import { confirm } from '@inquirer/prompts'
 import pc from 'picocolors'
-import { discoverRepos, inspectRepos } from '../repos.js'
+import { discoverPackages, inspectRepos } from '../repos.js'
 import { loadConfig } from '../loadConfig.js'
 import { syncDefaultBranch } from '../defaultBranchSync.js'
-import { tagName, tagExists, tagExistsAsync, createAndPushTag } from '../tags.js'
+import { tagFor, tagExists, tagExistsAsync, createAndPushTag } from '../tags.js'
 import { selectPackages } from '../selectPackages.js'
 import { filterByNames } from '../filterByNames.js'
 import { pMap } from '../pMap.js'
@@ -19,7 +19,7 @@ import { releaseOne } from './release.js'
 // want a release for it" are almost always the same reason to run this.
 export async function tagCommand({ configPath, packages, yes = false, dryRun = false, release = false } = {}) {
   const config = loadConfig({ configPath })
-  const allRepos = (await inspectRepos(discoverRepos(config))).filter((r) => r.version)
+  const allRepos = (await inspectRepos(discoverPackages(config))).filter((r) => r.version)
   if (allRepos.length === 0) {
     console.log(pc.yellow('No repos found.'))
     return
@@ -38,7 +38,7 @@ export async function tagCommand({ configPath, packages, yes = false, dryRun = f
 
   console.log(pc.dim(`Checking ${repos.length} package(s) for an existing tag...`))
   const withTag = await pMap(repos, async (r) => {
-    const tag = tagName(r.version)
+    const tag = tagFor(r)
     const alreadyTagged = await tagExistsAsync(r, tag)
     console.log(pc.dim(`  ${r.dir}: ${tag} — ${alreadyTagged ? 'already tagged' : 'not tagged yet'}`))
     return { ...r, tag, alreadyTagged }

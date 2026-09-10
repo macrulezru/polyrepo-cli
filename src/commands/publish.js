@@ -1,8 +1,8 @@
 import { confirm } from '@inquirer/prompts'
 import pc from 'picocolors'
-import { discoverRepos, inspectRepos } from '../repos.js'
+import { discoverPackages, inspectRepos } from '../repos.js'
 import { loadConfig } from '../loadConfig.js'
-import { npm } from '../exec.js'
+import { npm, pnpm } from '../exec.js'
 import { fetchPublishedVersionAsync } from '../registry.js'
 import { selectPackages } from '../selectPackages.js'
 import { filterByNames } from '../filterByNames.js'
@@ -11,7 +11,11 @@ import { heading, stepHeading, ok, fail, warn, columnWidths, formatRow } from '.
 
 export async function publishCommand({ configPath, packages, yes = false, dryRun = false } = {}) {
   const config = loadConfig({ configPath })
-  const allRepos = (await inspectRepos(discoverRepos(config))).filter((r) => r.version)
+  // A private package (e.g. a pnpm workspace's own root manifest, or a
+  // workspace member like a playground app) never belongs in this list —
+  // `npm`/`pnpm publish` would just refuse it, so there's nothing to check
+  // against the registry or offer in the checkbox.
+  const allRepos = (await inspectRepos(discoverPackages(config))).filter((r) => r.version && !r.private)
   if (allRepos.length === 0) {
     console.log(pc.yellow('No repos found.'))
     return
@@ -88,10 +92,18 @@ export async function publishCommand({ configPath, packages, yes = false, dryRun
   for (const repo of selected) {
     index += 1
     stepHeading(index, selected.length, `${repo.name}@${repo.version}`)
-    // Real terminal, not captured — npm publish can stop for a 2FA/OTP
-    // prompt, and --dry-run (npm's own flag) does a full dry run including
-    // packing, so this exercises the same path as a real publish.
-    const result = npm(repo.path, ['publish', ...(dryRun ? ['--dry-run'] : [])], { interactive: true })
+    // Real terminal, not captured — npm/pnpm publish can stop for a 2FA/OTP
+    // prompt, and --dry-run does a full dry run including packing, so this
+    // exercises the same path as a real publish. A pnpm workspace member
+    // publishes through `pnpm publish` instead of `npm publish` — pnpm
+    // rewrites a "workspace:*" dependency on a sibling package to its real
+    // version when packing, which npm doesn't understand at all.
+    // --no-git-checks matches npm's own (looser) behavior: pnpm publish
+    // otherwise does its own branch/clean-tree checks on top of this tool's
+    // own, which would newly block publishes that npm never blocked.
+    const result = repo.isWorkspaceMember
+      ? pnpm(repo.path, ['publish', '--no-git-checks', ...(dryRun ? ['--dry-run'] : [])], { interactive: true })
+      : npm(repo.path, ['publish', ...(dryRun ? ['--dry-run'] : [])], { interactive: true })
     if (!result.ok) fail(`npm publish failed (exit ${result.status}).`)
     else ok(`Published ${repo.name}@${repo.version}${dryRun ? ' (dry run).' : '.'}`)
   }

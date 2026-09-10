@@ -7,7 +7,11 @@ version bumps through a pull request, npm publishing, releases,
 and cross-package dependency drift — all from one tool, all reviewable
 with `--dry-run` before anything actually changes. Works with GitHub and
 GitLab (including self-hosted), autodetected per repo — a folder can
-freely mix both.
+freely mix both. A repo that's itself a pnpm workspace (a
+`pnpm-workspace.yaml`, e.g. a `packages/*` layout) is auto-detected and
+expanded into one entry per publishable member, each versioned, tagged,
+and released independently — everything else keeps working exactly as
+before for a plain, one-package-per-repo folder.
 
 ## Features
 
@@ -51,9 +55,16 @@ freely mix both.
   previous attempt was interrupted partway — it picks up from wherever
   it left off instead of failing or duplicating work. Can wait for CI
   checks before merging (`--wait-checks`), and drafts a
-  `CHANGELOG.md` entry when the package already has one.
-- **`publish`** — run `npm publish` for the packages that are actually
-  ahead of the registry, after comparing each one automatically.
+  `CHANGELOG.md` entry when the package already has one. Tags as
+  `v<version>`, or `<name>@<version>` for a pnpm workspace member (so two
+  packages in the same repo bumped to the same version number never
+  collide on one tag) — `tag`/`release` follow the same convention.
+- **`publish`** — run `npm publish` (or, for a pnpm workspace member,
+  `pnpm publish` — so a `"workspace:*"` dependency on a sibling package
+  resolves to a real version instead of npm choking on it) for the
+  packages that are actually ahead of the registry, after comparing each
+  one automatically. A private package (a workspace root, or a private
+  member like a playground app) is never offered.
 - **`tag`** — tag a package at its *current* version without bumping
   again, for when the version was already moved forward some other
   way. Offers to create a release right after.
