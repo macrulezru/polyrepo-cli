@@ -122,6 +122,17 @@ export function releaseOne(repo, tag, { dryRun, config } = {}) {
     return fail('Could not determine a git host for this repo (no `origin` remote?) — skipping the release.')
   }
 
+  // Re-checked here (not just trusting a `status` computed earlier — the
+  // checkbox in releaseCommand shows this, but --packages bypasses it
+  // entirely, same as elsewhere in this CLI) because there's no such thing
+  // as "recreate": `gh`/`glab release create` both fail outright (HTTP 422
+  // on GitHub) against a tag that already has a release. The only safe
+  // move once one exists is to leave it alone and report success, the same
+  // way `tag` treats an already-existing tag as done rather than an error.
+  if (provider.releaseExists(repo, tag)) {
+    return ok(`Release ${tag} already exists — nothing to do.`)
+  }
+
   const notes = extractChangelogSection(repo, repo.version)
   const title = `${repo.name}@${repo.version}`
   ok(notes ? 'Using the matching CHANGELOG.md section as release notes.' : `No changelog entry — using ${provider.name === 'github' ? '--generate-notes' : 'a commit-log summary'}.`)

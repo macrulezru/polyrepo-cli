@@ -135,6 +135,13 @@ async function releaseExistsAsync(repo, tag) {
   return result.ok
 }
 
+// Synchronous counterpart — see the GitHub adapter's releaseExists for why
+// release.js re-checks this right before creating instead of trusting a
+// status computed earlier.
+function releaseExists(repo, tag) {
+  return glab(repo.path, ['release', 'view', tag], { quiet: true }).ok
+}
+
 // GitLab has no `--generate-notes` (no auto-summary from merged MRs/
 // commits) — when there's no CHANGELOG.md section to use, this falls back
 // to the same commit-log listing `bump` already uses to draft a
@@ -220,6 +227,7 @@ export const gitlabProvider = {
   isBranchProtectedAsync,
   isPrMergedAsync,
   releaseExistsAsync,
+  releaseExists,
   createRelease,
   listOrgRepos,
 }
