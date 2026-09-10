@@ -112,6 +112,15 @@ async function releaseExistsAsync(repo, tag) {
   return result.ok
 }
 
+// Synchronous counterpart, used right before actually creating a release
+// (see release.js's releaseOne) — re-checked there instead of just trusting
+// whatever status was computed earlier, since `gh release create` fails
+// outright against a tag that already has one; there's no "recreate", so
+// this is the one thing that has to be current at the moment of the call.
+function releaseExists(repo, tag) {
+  return gh(repo.path, ['release', 'view', tag], { quiet: true }).ok
+}
+
 // `--verify-tag` makes this fail loudly instead of inventing a new tag if
 // the one we expect (from `polyrepo bump`) somehow isn't on origin yet — a
 // release should only ever point at a tag that already exists. Notes come
@@ -178,6 +187,7 @@ export const githubProvider = {
   isBranchProtectedAsync,
   isPrMergedAsync,
   releaseExistsAsync,
+  releaseExists,
   createRelease,
   listOrgRepos,
 }
