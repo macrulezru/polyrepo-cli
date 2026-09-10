@@ -87,6 +87,7 @@ export async function publishCommand({ configPath, packages, yes = false, dryRun
   }
 
   if (!dryRun && !(await ensureNpmLogin())) return
+  if (!(await ensureWorkspacesInstalled(selected))) return
 
   let index = 0
   for (const repo of selected) {
@@ -107,6 +108,29 @@ export async function publishCommand({ configPath, packages, yes = false, dryRun
     if (!result.ok) fail(`npm publish failed (exit ${result.status}).`)
     else ok(`Published ${repo.name}@${repo.version}${dryRun ? ' (dry run).' : '.'}`)
   }
+}
+
+// `pnpm publish` resolves a workspace member's "workspace:*" dependency on
+// a sibling package by reading that sibling's linked copy in node_modules
+// — without a prior `pnpm install`, it fails outright with
+// ERR_PNPM_CANNOT_RESOLVE_WORKSPACE_PROTOCOL instead of publishing anything
+// (a missing/never-run install, or one that's gone stale since — a
+// dependency added or bumped locally without reinstalling — both look the
+// same to pnpm). Run once per distinct repo among the selection (not per
+// package — a repeat run against an already-current install is a fast
+// no-op) right before publishing, so this is caught up front with one
+// clear message instead of failing member-by-member partway through.
+async function ensureWorkspacesInstalled(selected) {
+  const repoPaths = [...new Set(selected.filter((r) => r.isWorkspaceMember).map((r) => r.repoPath))]
+  for (const repoPath of repoPaths) {
+    console.log(pc.dim(`Running \`pnpm install\` in ${repoPath} to link workspace dependencies...`))
+    const result = pnpm(repoPath, ['install'], { interactive: true })
+    if (!result.ok) {
+      fail(`pnpm install failed in ${repoPath} (exit ${result.status}) — aborting before publishing anything.`)
+      return false
+    }
+  }
+  return true
 }
 
 // Without this, a batch of several packages would only find out about a
