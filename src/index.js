@@ -156,6 +156,12 @@ Environment section for how host detection works). All three are edited
 through the same menu; nothing is written to disk until you choose "Save
 and exit".
 
+A repo folder that contains a \`pnpm-workspace.yaml\` (a pnpm workspace) needs
+no separate entry here — it's still just one root/package folder, but every
+other command automatically expands it into one entry per publishable
+member under it (e.g. \`packages/*\`), instead of the workspace root's own
+(usually private) package.json.
+
 Examples:
   $ polyrepo setup
   $ polyrepo setup --config "D:\\other\\polyrepo.config.json"   Edit a different config file
@@ -582,7 +588,12 @@ program
 Compares each package's local version against the npm registry first (in
 parallel — one round trip per package, not one after another), so the
 checkbox pre-selects only what's actually ahead. Runs with a real terminal
-(not captured), so an npm 2FA/OTP prompt works normally.
+(not captured), so an npm 2FA/OTP prompt works normally. A pnpm workspace
+member (see \`polyrepo setup\`'s help) publishes through \`pnpm publish
+--no-git-checks\` instead of \`npm publish\`, so a \`"workspace:*"\`
+dependency on a sibling package resolves to a real version rather than
+npm choking on it. Private packages (a workspace root, or a private
+member like a playground app) are never offered.
 
 Examples:
   $ polyrepo publish                            See what needs publishing, then publish it

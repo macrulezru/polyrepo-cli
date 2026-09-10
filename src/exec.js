@@ -138,3 +138,12 @@ export function glab(cwd, args, opts) {
 export function npm(cwd, args, opts) {
   return run(cwd, 'npm', args, opts)
 }
+
+// Only used for `publish` on a pnpm workspace member — a plain `npm
+// publish` doesn't understand a `"workspace:*"` dependency range (common
+// between sibling packages in a pnpm workspace) and would either fail or
+// publish the tarball with that unresolved range still in it; `pnpm
+// publish` rewrites it to the real version on the fly when packing.
+export function pnpm(cwd, args, opts) {
+  return run(cwd, 'pnpm', args, opts)
+}

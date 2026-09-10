@@ -1,14 +1,14 @@
 import fs from 'node:fs'
 import { confirm } from '@inquirer/prompts'
 import pc from 'picocolors'
-import { discoverRepos, inspectRepos, readPackageJson } from '../repos.js'
-import { bumpBranchName } from '../config.js'
+import { discoverPackages, inspectRepos, readPackageJson } from '../repos.js'
+import { branchFor } from '../config.js'
 import { loadConfig } from '../loadConfig.js'
 import { bumpVersion, replaceVersionInText } from '../version.js'
 import { git } from '../exec.js'
 import { syncDefaultBranch } from '../defaultBranchSync.js'
 import { providerFor } from '../providers/index.js'
-import { tagName, tagExists, createAndPushTag } from '../tags.js'
+import { tagFor, tagExists, createAndPushTag } from '../tags.js'
 import { describeRecentChangesForAll, formatRecentChanges, fullCommitLinesSince } from '../changes.js'
 import { hasChangelog, addChangelogEntry } from '../changelog.js'
 import { findStaleLocalDeps } from '../crossDeps.js'
@@ -36,7 +36,7 @@ export async function bumpCommand({
   customVersion, // exact version to set, for bumpType 'custom'
 } = {}) {
   const config = loadConfig({ configPath })
-  const discovered = discoverRepos(config)
+  const discovered = discoverPackages(config)
   if (discovered.length === 0) {
     console.log(pc.yellow('No repos found.'))
     return
@@ -131,7 +131,7 @@ async function bumpOne(repo, { dryRun, waitChecks, config }) {
   if (!syncResult.ok) return fail(syncResult.message)
   ok(`${repo.defaultBranch} is up to date.`)
 
-  const branchName = bumpBranchName(repo.newVersion)
+  const branchName = branchFor(repo, repo.newVersion)
   const state = provider.detectBumpState(repo, branchName)
 
   if (dryRun) {
@@ -144,7 +144,7 @@ async function bumpOne(repo, { dryRun, waitChecks, config }) {
       const waitNote = waitChecks ? ', waiting for CI checks first' : ''
       console.log(
         pc.magenta(
-          `  [dry-run] would ${verb} branch ${branchName}, ensure version ${repo.newVersion} (+ a CHANGELOG.md entry if one exists), commit/push if needed, then ${prVerb}${waitNote}, then tag ${tagName(repo.newVersion)}.`,
+          `  [dry-run] would ${verb} branch ${branchName}, ensure version ${repo.newVersion} (+ a CHANGELOG.md entry if one exists), commit/push if needed, then ${prVerb}${waitNote}, then tag ${tagFor(repo, repo.newVersion)}.`,
         ),
       )
     }
@@ -217,7 +217,7 @@ async function bumpOne(repo, { dryRun, waitChecks, config }) {
     ok(`Already merged as ${provider.requestLabel} #${state.pr.number} — ${repo.defaultBranch} already has it.`)
   }
 
-  const tag = tagName(repo.newVersion)
+  const tag = tagFor(repo, repo.newVersion)
   if (tagExists(repo, tag)) {
     ok(`Tag ${tag} already exists on origin.`)
   } else {
@@ -251,7 +251,7 @@ function checkoutBumpBranch(repo, branchName) {
 // dependencies/peerDependencies/devDependencies pointing at a range that no
 // longer matches, and nothing else would surface that.
 async function reportStaleLocalDeps(config) {
-  const repos = (await inspectRepos(discoverRepos(config))).filter((r) => r.version)
+  const repos = (await inspectRepos(discoverPackages(config))).filter((r) => r.version)
   const issues = findStaleLocalDeps(repos)
   if (issues.length === 0) return
   heading('Stale local dependency references')

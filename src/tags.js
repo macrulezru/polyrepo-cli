@@ -1,7 +1,18 @@
 import { git, gitAsync } from './exec.js'
 
-export function tagName(version) {
-  return `v${version}`
+export function tagName(version, { scopedName } = {}) {
+  return scopedName ? `${scopedName}@${version}` : `v${version}`
+}
+
+// Convenience wrapper for the common case — this package's own tag, scoped
+// automatically when it's a pnpm workspace member (see repos.js's
+// discoverPackages) so two packages in the same repo bumped to the same
+// version number never collide on one `v<version>` tag, unscoped (the
+// original form, unchanged for every non-monorepo package) otherwise.
+// `version` defaults to the package's current version, but bump.js passes
+// the *new* version explicitly since it's naming the tag before it exists.
+export function tagFor(repo, version = repo.version) {
+  return tagName(version, { scopedName: repo.isWorkspaceMember ? repo.name : undefined })
 }
 
 export function tagExists(repo, tag) {

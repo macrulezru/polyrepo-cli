@@ -1,6 +1,6 @@
 import { confirm } from '@inquirer/prompts'
 import pc from 'picocolors'
-import { discoverRepos, inspectRepos } from '../repos.js'
+import { discoverPackages, inspectRepos } from '../repos.js'
 import { loadConfig } from '../loadConfig.js'
 import { run } from '../exec.js'
 import { selectPackages } from '../selectPackages.js'
@@ -14,7 +14,7 @@ import { heading, stepHeading, ok, fail, columnWidths, formatRow } from '../ui.j
 // command at once would be unreadable anyway.
 export async function execCommand({ configPath, packages, yes = false, bail = false, cmd } = {}) {
   const config = loadConfig({ configPath })
-  const repos = await inspectRepos(discoverRepos(config))
+  const repos = await inspectRepos(discoverPackages(config))
   if (repos.length === 0) {
     console.log(pc.yellow('No repos found.'))
     return
