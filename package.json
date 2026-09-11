@@ -1,6 +1,6 @@
 {
   "name": "polyrepo-cli",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Interactive CLI for managing a folder of local npm package repos: version bumps through a PR, npm publish, GitHub releases, and cross-package dependency drift checks — all from one tool.",
   "homepage": "https://npm.vuecraft.ru/en/packages/polyrepo-cli/",
   "type": "module",

@@ -30,9 +30,24 @@ export async function tagExistsAsync(repo, tag) {
   return result.ok
 }
 
+// `tagExists`/`tagExistsAsync` above only check origin (deliberately — see
+// their own comment), so a tag that was created locally by a previous
+// `polyrepo tag` run but never made it to origin (interrupted, a failed
+// `git push`, no network at the time) reads as "not tagged yet" and gets
+// tried again — and `git tag -a` fails outright when a tag with that name
+// already exists locally, aborting the whole run. Checked here, right
+// before creating, so that exact half-finished state self-heals: skip
+// re-creating the tag and just push the one that's already sitting there.
+function localTagExists(repo, tag) {
+  const result = git(repo.path, ['tag', '-l', tag], { quiet: true })
+  return result.ok && result.stdout === tag
+}
+
 export function createAndPushTag(repo, tag, { dryRun } = {}) {
-  if (!git(repo.path, ['tag', '-a', tag, '-m', tag], { mutating: true, dryRun }).ok) {
-    return { ok: false, message: `git tag ${tag} failed.` }
+  if (!localTagExists(repo, tag)) {
+    if (!git(repo.path, ['tag', '-a', tag, '-m', tag], { mutating: true, dryRun }).ok) {
+      return { ok: false, message: `git tag ${tag} failed.` }
+    }
   }
   if (!git(repo.path, ['push', 'origin', tag], { mutating: true, dryRun }).ok) {
     return { ok: false, message: `git push origin ${tag} failed.` }
