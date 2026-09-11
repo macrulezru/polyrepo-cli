@@ -22,11 +22,13 @@ before for a plain, one-package-per-repo folder.
 - **`clone`** — diff a GitHub org's (or, with `--provider gitlab`, a
   GitLab group's) repo list against what's already cloned under a
   root, and clone whatever's missing.
-- **`list`** — one table per package: version, branch, git status, git
-  tag, release status, npm registry status, and cross-package
-  dependency drift. `list --quick` skips the network checks for an
-  instant version/branch/git-only view; `list --output <path>` also
-  saves the same table as Markdown, JSON, CSV, HTML, or plain text.
+- **`list`** — one table per package: local version, branch, git
+  status, the version on origin's default branch (independent of
+  whatever's checked out locally — see below), git tag, release
+  status, npm registry version, and cross-package dependency drift.
+  `list --quick` skips the network checks for an instant
+  version/branch/git-only view; `list --output <path>` also saves the
+  same table as Markdown, JSON, CSV, HTML, or plain text.
 - **`outdated`** — one table across every package of what's outdated
   (`npm outdated`), instead of running it in each repo by hand.
 - **`audit`** — one table across every package of npm security
@@ -41,8 +43,8 @@ before for a plain, one-package-per-repo folder.
   remote-tracking refs, divergence from origin, detached `HEAD`,
   missing branch protection, leftover `bump` branches — with a few
   safe, non-destructive self-repairs along the way, and
-  `--clean-branches` for an interactive local-branch cleanup), and
-  cross-package dependency drift.
+  `--clean-branches`/`--clean-remote-branches` for an interactive
+  local/origin branch cleanup), and cross-package dependency drift.
 - **`switch-default`** — fast-forward selected repos to their up-to-date
   default branch, whatever it's actually named (`master`, `main`, or
   anything else — detected per repo, not assumed). `--force` hard-resets
@@ -59,17 +61,38 @@ before for a plain, one-package-per-repo folder.
   `v<version>`, or `<name>@<version>` for a pnpm workspace member (so two
   packages in the same repo bumped to the same version number never
   collide on one tag) — `tag`/`release` follow the same convention.
+  `--publish` also publishes each package right after it's tagged
+  (asked once at the end if you leave the flag off, same as `tag`'s
+  release prompt) — see `publish` below for exactly what that runs.
 - **`publish`** — run `npm publish` (or, for a pnpm workspace member,
   `pnpm publish` — so a `"workspace:*"` dependency on a sibling package
   resolves to a real version instead of npm choking on it) for the
   packages that are actually ahead of the registry, after comparing each
   one automatically. A private package (a workspace root, or a private
-  member like a playground app) is never offered.
+  member like a playground app) is never offered. A prerelease version
+  (e.g. `2.0.0-beta.0`) publishes under the `next` dist-tag automatically
+  instead of npm's own default `latest` — `--dist-tag` overrides this for
+  any version. Local, origin, and npm are three independent sources of
+  truth — nothing enforces that they agree, and `publish` always
+  publishes whatever's on disk regardless — so it warns (without
+  blocking) when the selected packages' local version differs from
+  origin's, or the repo isn't on its default branch, or has uncommitted
+  changes.
 - **`tag`** — tag a package at its *current* version without bumping
   again, for when the version was already moved forward some other
-  way. Offers to create a release right after.
+  way. Fast-forwards to the default branch first, then re-reads the
+  version so the tag always names what's actually being tagged (not
+  whatever was on disk before the sync) — warns if that changed the tag
+  name. Offers to create a release right after.
 - **`release`** — create a release from a tag, with notes pulled from
   the matching `CHANGELOG.md` section when there is one.
+- **`sync-deps`** — the write side of the "Deps" column in `list`/
+  `doctor`: picks up every local package whose declared range on
+  another local package no longer matches that package's current
+  version, previews the exact before/after (keeping each range's own
+  `^`/`~`/exact style), and updates package.json for the ones you pick.
+  Only ever edits files on disk — no commit, no push; review and commit
+  it yourself afterward.
 - **`exec`** — run any command (`npm test`, `npm outdated`, a lint
   script, anything) across every selected package, one at a time, with
   a real terminal.
@@ -170,22 +193,25 @@ Checking 18 package(s) for branch protection...
 Stale bump branches
 
 Checking 18 package(s) for leftover bump branches with a merged PR...
-  ✓ No stale bump branches found.
+  ✓ No stale bump branches found, locally or on origin.
 
 Cross-package dependencies
 
   ✓ No stale local dependency references found.
 ```
 
-`polyrepo list` — version/branch/tag/release/npm/deps for every
-package at a glance (truncated here — a real run covers all of them):
+`polyrepo list` — local/branch/git/origin/tag/release/npm/deps for
+every package at a glance (truncated here — a real run covers all of
+them). `Local`, `Origin` (the version on origin's default branch —
+independent of whatever's checked out locally), and `npm` are shown
+side by side since nothing keeps the three in sync automatically:
 
 ```
-Package                   Version  Branch  Git    Tag      Release  npm  Deps
-------------------------  -------  ------  -----  -------  -------  ---  ----
-color-value-tools         1.1.12   master  clean  v1.1.12  ✓        ✓    ✓
-css-magic-gradient        1.2.14   master  clean  v1.2.14  ✓        ✓    ✓
-os-detect                 2.1.5    master  clean  v2.1.5   ✓        ✓    ✓
+Package                   Local   Branch  Git    Origin  Tag      Release  npm     Deps
+------------------------  ------  ------  -----  ------  -------  -------  ------  ----
+color-value-tools         1.1.12  master  clean  1.1.12  v1.1.12  ✓        1.1.12  ✓
+css-magic-gradient        1.2.14  master  clean  1.2.14  v1.2.14  ✓        1.2.14  ✓
+os-detect                 2.2.0   master  clean  2.2.0   v2.2.0   ✓        2.2.0   ✓
 …
 ```
 
