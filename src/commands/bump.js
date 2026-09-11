@@ -15,6 +15,7 @@ import { findStaleLocalDeps } from '../crossDeps.js'
 import { heading, stepHeading, ok, fail, warn, columnWidths, formatRow } from '../ui.js'
 import { selectPackages } from '../selectPackages.js'
 import { startSpinner } from '../spinner.js'
+import { publishOne, ensureNpmLogin, ensureWorkspacesInstalled } from './publish.js'
 
 function bumpTypeLabel(bumpType, { preid, customVersion } = {}) {
   if (bumpType === 'custom') return `custom → ${customVersion}`
@@ -34,6 +35,7 @@ export async function bumpCommand({
   bumpType = 'patch', // 'patch' | 'minor' | 'major' | 'premajor' | 'preminor' | 'prepatch' | 'prerelease' | 'custom'
   preid, // prerelease identifier (e.g. 'alpha') for the 'pre*'/'prerelease' bump types
   customVersion, // exact version to set, for bumpType 'custom'
+  publish = false, // after tagging, also publish to npm without asking (see --publish)
 } = {}) {
   const config = loadConfig({ configPath })
   const discovered = discoverPackages(config)
@@ -107,16 +109,39 @@ export async function bumpCommand({
   }
 
   let index = 0
+  const succeeded = []
   for (const repo of selected) {
     index += 1
     stepHeading(index, selected.length, `${repo.dir}  ${repo.version} → ${repo.newVersion}`)
-    await bumpOne(repo, { dryRun, waitChecks, config })
+    const result = await bumpOne(repo, { dryRun, waitChecks, config, publish })
+    if (result?.ok) succeeded.push(result.repo)
   }
 
   if (!dryRun) await reportStaleLocalDeps(config)
+
+  if (!dryRun && succeeded.length > 0) {
+    let wantPublish = publish
+    if (!wantPublish && !yes) {
+      wantPublish = await confirm({
+        message: `Publish the ${succeeded.length} package(s) just bumped to npm now?`,
+        default: true,
+      })
+    }
+    if (wantPublish) {
+      heading('Publish to npm')
+      if (!(await ensureNpmLogin())) return
+      if (!(await ensureWorkspacesInstalled(succeeded))) return
+      let pubIndex = 0
+      for (const repo of succeeded) {
+        pubIndex += 1
+        stepHeading(pubIndex, succeeded.length, `${repo.name}@${repo.version}`)
+        await publishOne(repo, { dryRun: false })
+      }
+    }
+  }
 }
 
-async function bumpOne(repo, { dryRun, waitChecks, config }) {
+async function bumpOne(repo, { dryRun, waitChecks, config, publish }) {
   if (!repo.clean) {
     warn('Working tree is dirty — skipping to avoid committing unrelated changes.')
     return
@@ -142,9 +167,10 @@ async function bumpOne(repo, { dryRun, waitChecks, config }) {
       const prVerb =
         state.status === 'open' ? `merge existing ${provider.requestLabel} #${state.pr.number}` : `open + merge a ${provider.requestLabel}`
       const waitNote = waitChecks ? ', waiting for CI checks first' : ''
+      const publishNote = publish ? ', then publish to npm' : ''
       console.log(
         pc.magenta(
-          `  [dry-run] would ${verb} branch ${branchName}, ensure version ${repo.newVersion} (+ a CHANGELOG.md entry if one exists), commit/push if needed, then ${prVerb}${waitNote}, then tag ${tagFor(repo, repo.newVersion)}.`,
+          `  [dry-run] would ${verb} branch ${branchName}, ensure version ${repo.newVersion} (+ a CHANGELOG.md entry if one exists), commit/push if needed, then ${prVerb}${waitNote}, then tag ${tagFor(repo, repo.newVersion)}${publishNote}.`,
         ),
       )
     }
@@ -220,11 +246,16 @@ async function bumpOne(repo, { dryRun, waitChecks, config }) {
   const tag = tagFor(repo, repo.newVersion)
   if (tagExists(repo, tag)) {
     ok(`Tag ${tag} already exists on origin.`)
-  } else {
-    const tagResult = createAndPushTag(repo, tag)
-    if (!tagResult.ok) fail(tagResult.message)
-    else ok(`Tagged and pushed ${tag}.`)
+    return { ok: true, repo: { ...repo, version: repo.newVersion } }
   }
+
+  const tagResult = createAndPushTag(repo, tag)
+  if (!tagResult.ok) {
+    fail(tagResult.message)
+    return { ok: false }
+  }
+  ok(`Tagged and pushed ${tag}.`)
+  return { ok: true, repo: { ...repo, version: repo.newVersion } }
 }
 
 // Reuse a local branch left over from a previous attempt if there is one,

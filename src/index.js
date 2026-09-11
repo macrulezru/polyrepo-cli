@@ -17,6 +17,7 @@ import { outdatedCommand } from './commands/outdated.js'
 import { auditCommand } from './commands/audit.js'
 import { prsCommand } from './commands/prs.js'
 import { cloneCommand } from './commands/clone.js'
+import { syncDepsCommand } from './commands/syncDeps.js'
 
 // Read once from package.json rather than a literal string here — the two
 // silently drifted apart before (this file said 1.0.0 while package.json
@@ -95,7 +96,7 @@ function wrapText(text, width) {
 program
   .name('polyrepo')
   .description(
-    'Manage local npm package repos on GitHub or GitLab (autodetected per repo): pick which directories to scan (setup), clone missing ones from a GitHub org or GitLab group (clone), see their state (list), outdated dependencies (outdated), security vulnerabilities (audit), or open PRs/MRs (prs), run a health check (doctor), keep them on an up-to-date default branch (switch-default), release a version through a PR/MR (bump), publish to npm (publish), tag an already-current version (tag), create releases (release), or run any command across every repo (exec).',
+    'Manage local npm package repos on GitHub or GitLab (autodetected per repo): pick which directories to scan (setup), clone missing ones from a GitHub org or GitLab group (clone), see their state (list), outdated dependencies (outdated), security vulnerabilities (audit), or open PRs/MRs (prs), run a health check (doctor), keep them on an up-to-date default branch (switch-default), release a version through a PR/MR (bump), publish to npm (publish), tag an already-current version (tag), create releases (release), fix stale cross-package dependency ranges (sync-deps), or run any command across every repo (exec).',
   )
   .version(CLI_VERSION)
   .option(
@@ -135,6 +136,7 @@ Examples:
   $ polyrepo publish                            Publish packages that are ahead of the registry
   $ polyrepo tag                                Tag an already-current version (no bump needed)
   $ polyrepo release                            Create releases for tagged packages
+  $ polyrepo sync-deps                          Fix local dependency ranges left stale by a bump
   $ polyrepo exec -- npm test                   Run any command across every (or selected) package
 
 Run \`polyrepo <command> --help\` for that command's own options and examples.
@@ -353,6 +355,10 @@ program
     '--clean-branches',
     'After scanning, show a checkbox of local bump branches whose PR is already merged, and delete the ones you pick.',
   )
+  .option(
+    '--clean-remote-branches',
+    'Same as --clean-branches, but for the copy left on origin instead of the local one — shared, visible state, so this is a separate opt-in.',
+  )
   .addHelpText(
     'after',
     `
@@ -384,14 +390,15 @@ non-destructive self-repair:
                         branch protection enabled on its host. Report-only
                         — enabling protection is a policy choice, not
                         something to set on your behalf.
-  Stale bump branches   \`bump\` merges through a PR/MR with the branch left
-                        on origin (see \`bump\` above), so a local copy sticks
-                        around too. Reports how many have an already-merged
-                        PR/MR; \`--clean-branches\` turns that into a checkbox
-                        to delete the local ones you pick (\`git branch -d\`
-                        — never the branch on origin, and refuses instead
-                        of forcing if a branch isn't actually fully merged
-                        locally).
+  Stale bump branches   \`bump\` merges through a PR/MR but leaves the branch
+                        behind, both locally and on origin. Checked and
+                        reported separately for each: \`--clean-branches\`
+                        turns the local report into a checkbox to delete
+                        (\`git branch -d\` — refuses instead of forcing if a
+                        branch isn't actually fully merged locally);
+                        \`--clean-remote-branches\` does the same for origin
+                        (\`git push origin --delete\`) — its own opt-in since
+                        that's shared, visible state, not local bookkeeping.
   Cross-package deps    does any local package's dependency range no longer
                         match another local package's current version.
 
@@ -409,12 +416,15 @@ you rename a branch on the host or want to check for accumulated cruft.
 Examples:
   $ polyrepo doctor
   $ polyrepo doctor --clean-branches
+  $ polyrepo doctor --clean-remote-branches
+  $ polyrepo doctor --clean-branches --clean-remote-branches
 `,
   )
   .action((opts) =>
     doctorCommand({
       configPath: program.opts().config,
       cleanBranches: Boolean(opts.cleanBranches),
+      cleanRemoteBranches: Boolean(opts.cleanRemoteBranches),
     }),
   )
 
@@ -500,12 +510,14 @@ program
   .option(...PACKAGES_OPTION)
   .option(...YES_OPTION)
   .option('--wait-checks', 'Wait for CI checks (if any are configured) before merging; abort if they fail.')
+  .option('--publish', 'After tagging, also publish to npm — without asking (see the Publishing section below).')
   .addHelpText(
     'after',
     `
-Branch, PR/MR, merge, and tag — no npm publish here, that's its own command
-(see \`polyrepo publish\`; for a release from the resulting tag, see
-\`polyrepo release\`). Works against GitHub or GitLab, autodetected per repo
+Branch, PR/MR, merge, and tag. Publishing is a separate step by default (see
+\`polyrepo publish\`; for a release from the resulting tag, see
+\`polyrepo release\`) — pass \`--publish\` to also publish right after tagging
+(see "Publishing" below). Works against GitHub or GitLab, autodetected per repo
 (see \`polyrepo doctor\`'s Environment section) — a mixed folder just works.
 Bumps the patch version by default; \`--minor\`/\`--major\` bump that part
 instead (resetting the parts below it to 0, same as any semver tool). Safe
@@ -533,6 +545,17 @@ sets exactly what you give it — only allowed with \`--packages\` naming a
 single package, since applying one literal version to several packages at
 once is never actually what you want.
 
+Publishing: without \`--publish\`, whether every package just tagged gets
+published is asked once at the end (skipped with \`--yes\`, same as
+\`polyrepo tag\`'s \`--release\` prompt) — \`--publish\` answers that yes without
+asking, for scripts. Either way it's exactly \`polyrepo publish\` for exactly
+the packages that were just bumped: npm login is checked once up front, a
+pnpm workspace member's dependencies are (re)linked first if needed, and a
+prerelease version (e.g. 2.0.0-beta.0) publishes under the "next" dist-tag
+instead of "latest" automatically. Only packages that actually got tagged
+this run are offered — a package skipped for being dirty, or that failed
+partway, is never published.
+
 Examples:
   $ polyrepo bump --dry-run                     See the plan, nothing changes
   $ polyrepo bump                               Interactive: checkbox + confirm, patch bump
@@ -541,6 +564,7 @@ Examples:
   $ polyrepo bump --major --preid rc            Start a premajor rc prerelease (e.g. 2.0.0-rc.0)
   $ polyrepo bump --packages a --custom-version 3.0.0-hotfix.1   Set an exact version for one package
   $ polyrepo bump --wait-checks                 Wait for CI to go green before merging
+  $ polyrepo bump --publish --yes               Bump, tag, and publish, non-interactively
   $ polyrepo bump --packages a,b --yes          Non-interactive, for scripts/CI
 `,
   )
@@ -573,6 +597,7 @@ Examples:
       bumpType,
       preid: bumpType.startsWith('pre') ? opts.preid || 'alpha' : undefined,
       customVersion: opts.customVersion,
+      publish: Boolean(opts.publish),
     })
   })
 
@@ -580,6 +605,10 @@ program
   .command('publish')
   .description('Pick packages and run "npm publish" — pre-selects ones ahead of the registry.')
   .option('--dry-run', 'Run "npm publish --dry-run" instead of a real publish.')
+  .option(
+    '--dist-tag <tag>',
+    'npm dist-tag to publish every selected package under (default: "next" for a prerelease version, otherwise npm\'s own default "latest").',
+  )
   .option(...PACKAGES_OPTION)
   .option(...YES_OPTION)
   .addHelpText(
@@ -595,10 +624,24 @@ dependency on a sibling package resolves to a real version rather than
 npm choking on it. Private packages (a workspace root, or a private
 member like a playground app) are never offered.
 
+A prerelease version (anything with a \`-\`, e.g. 2.0.0-beta.0) publishes
+under the "next" dist-tag by default instead of npm's own default
+"latest" — otherwise it would become the version anyone installing
+without pinning a version gets, which is essentially never the intent of
+a prerelease. \`--dist-tag\` overrides this for every selected package
+(auto-detection included) — pass it explicitly to publish a stable
+version under something other than "latest" too (e.g. an LTS channel).
+
+publish never checks git state (a plain \`npm publish\` never has either) —
+it publishes whatever's on disk, but warns (without blocking) when a
+selected package isn't on its default branch, has uncommitted changes, or
+its local version differs from what's actually on origin.
+
 Examples:
   $ polyrepo publish                            See what needs publishing, then publish it
   $ polyrepo publish --dry-run                  Full build + pack, nothing actually published
   $ polyrepo publish --packages a,b --yes       Non-interactive, for scripts/CI
+  $ polyrepo publish --packages a --dist-tag next   Force a specific dist-tag
 `,
   )
   .action((opts) =>
@@ -607,6 +650,7 @@ Examples:
       configPath: program.opts().config,
       packages: opts.packages ? opts.packages.split(',') : undefined,
       yes: Boolean(opts.yes),
+      distTag: opts.distTag,
     }),
   )
 
@@ -677,6 +721,46 @@ Examples:
   )
   .action((opts) =>
     releaseCommand({
+      dryRun: Boolean(opts.dryRun),
+      configPath: program.opts().config,
+      packages: opts.packages ? opts.packages.split(',') : undefined,
+      yes: Boolean(opts.yes),
+    }),
+  )
+
+program
+  .command('sync-deps')
+  .description('Update stale local dependency ranges (see the Deps column in `list`) to match the current local version.')
+  .option('--dry-run', 'Print what would be updated, without actually writing any package.json.')
+  .option(...PACKAGES_OPTION)
+  .option(...YES_OPTION)
+  .addHelpText(
+    'after',
+    `
+The write side of the "Deps" column in \`list\` and the "Cross-package
+dependencies" section in \`doctor\`: a local package whose declared range on
+another local package no longer matches that package's current version
+(e.g. it still says \`^1.1.0\` after the dependency moved to 1.2.0). Every
+place that reports this stops at reporting — this is the one that fixes
+it. Shows a before/after checkbox, keeping each range's own style (\`^\`
+stays \`^\`, \`~\` stays \`~\`, an exact pin stays exact); anything unusual falls
+back to a \`^\` range, visible in the same preview before anything is
+written. \`--packages\` here means "only offer issues for these dependent
+packages", same meaning as everywhere else.
+
+Only ever edits package.json on disk — no commit, no push, no branch/PR.
+Review and commit the change yourself afterward (\`git diff\`, or
+\`polyrepo exec -- git commit -am "chore: sync local dependency ranges"\`
+across everything that changed).
+
+Examples:
+  $ polyrepo sync-deps                          See what's stale, then update it
+  $ polyrepo sync-deps --dry-run                Print the plan, change nothing
+  $ polyrepo sync-deps --packages a,b --yes     Non-interactive, for scripts/CI
+`,
+  )
+  .action((opts) =>
+    syncDepsCommand({
       dryRun: Boolean(opts.dryRun),
       configPath: program.opts().config,
       packages: opts.packages ? opts.packages.split(',') : undefined,

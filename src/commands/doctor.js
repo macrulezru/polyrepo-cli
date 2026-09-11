@@ -10,7 +10,7 @@ import { ALL_PROVIDERS, providerFor, providerNameFor } from '../providers/index.
 import { heading, ok, fail, warn, columnWidths, formatRow, promptTheme } from '../ui.js'
 import { startSpinner } from '../spinner.js'
 
-export async function doctorCommand({ configPath, cleanBranches = false } = {}) {
+export async function doctorCommand({ configPath, cleanBranches = false, cleanRemoteBranches = false } = {}) {
   // Discovered before printing "Environment" (unlike every other section
   // here, which discovers after) — which host CLI(s) to check depends on
   // which providers the repos actually use, so that has to be known first.
@@ -79,7 +79,7 @@ export async function doctorCommand({ configPath, cleanBranches = false } = {}) 
 
   heading('Stale bump branches')
   if (repos.length > 0) {
-    await checkStaleBumpBranches(repos, { cleanBranches, config })
+    await checkStaleBumpBranches(repos, { cleanBranches, cleanRemoteBranches, config })
   } else {
     console.log(pc.dim('Skipped — no packages discovered.'))
   }
@@ -253,17 +253,22 @@ async function checkBranchProtection(repos, config) {
 
 // `bump` merges through a PR/MR with the source branch kept (see
 // providers/github.js and providers/gitlab.js), so every completed bump
-// leaves its branch behind, locally and on origin, forever. This only
-// ever offers to delete the *local* copy — deleting the one on origin is
-// more sensitive shared state, not something to fold into an opt-in
-// local cleanup.
-async function findStaleBumpBranches(repos, config) {
+// leaves its branch behind, locally and on origin, forever. `refPattern`/
+// `format` let this same scan cover either local branches (refs/heads,
+// name as-is) or origin's remote-tracking branches (refs/remotes/origin,
+// name stripped of the "origin/" prefix) — same "does it look like a bump
+// branch, and is its PR/MR already merged" check either way.
+async function findStaleBranches(repos, config, { refPattern, format }) {
   const perRepo = await pMap(repos, async (r) => {
     const provider = providerFor(r, config)
     if (!provider) return []
-    const branchesResult = await gitAsync(r.path, ['for-each-ref', 'refs/heads', '--format=%(refname:short)'])
+    const branchesResult = await gitAsync(r.path, ['for-each-ref', refPattern, `--format=${format}`])
     if (!branchesResult.ok) return []
-    const candidates = branchesResult.stdout.split('\n').filter(Boolean).filter(isBumpBranchName)
+    const candidates = branchesResult.stdout
+      .split('\n')
+      .filter(Boolean)
+      .filter((b) => b !== 'HEAD') // origin/HEAD's own pointer, not a branch
+      .filter(isBumpBranchName)
     if (candidates.length === 0) return []
 
     const withStatus = await pMap(candidates, async (branch) => {
@@ -275,23 +280,71 @@ async function findStaleBumpBranches(repos, config) {
   return perRepo.flat()
 }
 
-async function checkStaleBumpBranches(repos, { cleanBranches, config }) {
+function findStaleLocalBumpBranches(repos, config) {
+  return findStaleBranches(repos, config, { refPattern: 'refs/heads', format: '%(refname:short)' })
+}
+
+// Remote-tracking refs, not a live query of origin — accurate as of the
+// last fetch/prune, which the "Remote sync" section above already just did
+// for every repo (`git remote prune origin`), so this reads as current
+// without a second round trip per repo.
+function findStaleRemoteBumpBranches(repos, config) {
+  return findStaleBranches(repos, config, { refPattern: 'refs/remotes/origin', format: '%(refname:strip=3)' })
+}
+
+async function checkStaleBumpBranches(repos, { cleanBranches, cleanRemoteBranches, config }) {
   const spinner = startSpinner(`Checking ${repos.length} package(s) for leftover bump branches with a merged PR...`)
-  const stale = await findStaleBumpBranches(repos, config)
+  const [staleLocal, staleRemote] = await Promise.all([
+    findStaleLocalBumpBranches(repos, config),
+    findStaleRemoteBumpBranches(repos, config),
+  ])
   spinner.stop()
 
-  if (stale.length === 0) {
-    ok('No stale bump branches found.')
+  if (staleLocal.length === 0 && staleRemote.length === 0) {
+    ok('No stale bump branches found, locally or on origin.')
     return
   }
 
-  if (!cleanBranches) {
+  if (staleLocal.length === 0) {
+    ok('No stale local bump branches found.')
+  } else if (!cleanBranches) {
     warn(
-      `${stale.length} stale bump branch(es) found across ${new Set(stale.map((s) => s.repo.dir)).size} package(s) — run \`polyrepo doctor --clean-branches\` to review and delete them.`,
+      `${staleLocal.length} stale local bump branch(es) found across ${new Set(staleLocal.map((s) => s.repo.dir)).size} package(s) — run \`polyrepo doctor --clean-branches\` to review and delete them.`,
     )
-    return
+  } else {
+    await promptAndDeleteBranches(staleLocal, {
+      message: 'Pick stale bump branches to delete locally (their PR is already merged):',
+      confirmMessage: (n) =>
+        `Delete ${n} local branch(es)? Only the local branch pointer goes away — the commits are already merged into the default branch.`,
+      deleteOne: (repo, branch) => git(repo.path, ['branch', '-d', branch]),
+      successMessage: (repo, branch) => `${repo.dir}: deleted local branch ${branch}.`,
+      failureMessage: (repo, branch) =>
+        `${repo.dir}: could not delete ${branch} (git branch -d failed — it may not be fully merged locally).`,
+    })
   }
 
+  if (staleRemote.length === 0) {
+    ok('No stale branches found on origin.')
+  } else if (!cleanRemoteBranches) {
+    warn(
+      `${staleRemote.length} stale branch(es) found on origin across ${new Set(staleRemote.map((s) => s.repo.dir)).size} package(s) — run \`polyrepo doctor --clean-remote-branches\` to review and delete them.`,
+    )
+  } else {
+    await promptAndDeleteBranches(staleRemote, {
+      message: 'Pick stale bump branches to delete on origin (their PR is already merged) — this is shared, visible state:',
+      confirmMessage: (n) =>
+        `Delete ${n} branch(es) on origin? The commits are already merged into the default branch — this only removes the now-unneeded branch pointer, but it's shared, public state.`,
+      deleteOne: (repo, branch) => git(repo.path, ['push', 'origin', '--delete', branch], { mutating: true }),
+      successMessage: (repo, branch) => `${repo.dir}: deleted origin branch ${branch}.`,
+      failureMessage: (repo, branch) =>
+        `${repo.dir}: could not delete origin/${branch} (git push --delete failed — it may already be gone, or you may lack permission).`,
+    })
+  }
+}
+
+// Shared checkbox → confirm → delete flow for both the local and the
+// remote cleanup above — same shape, different git command and wording.
+async function promptAndDeleteBranches(stale, { message, confirmMessage, deleteOne, successMessage, failureMessage }) {
   const columns = [{ value: (s) => s.repo.dir }, { value: (s) => s.branch, style: (s, t) => pc.dim(t) }]
   const widths = columnWidths(stale, columns)
   const choices = stale.map((s) => ({
@@ -300,31 +353,23 @@ async function checkStaleBumpBranches(repos, { cleanBranches, config }) {
     checked: true,
   }))
 
-  const selected = await checkbox({
-    message: 'Pick stale bump branches to delete locally (their PR is already merged):',
-    pageSize: 20,
-    theme: promptTheme,
-    choices,
-  })
+  const selected = await checkbox({ message, pageSize: 20, theme: promptTheme, choices })
 
   if (selected.length === 0) {
     console.log(pc.dim('Nothing selected.'))
     return
   }
 
-  const proceed = await confirm({
-    message: `Delete ${selected.length} local branch(es)? Only the local branch pointer goes away — the commits are already merged into the default branch.`,
-    default: true,
-  })
+  const proceed = await confirm({ message: confirmMessage(selected.length), default: true })
   if (!proceed) {
     console.log(pc.dim('Cancelled.'))
     return
   }
 
   for (const { repo, branch } of selected) {
-    const result = git(repo.path, ['branch', '-d', branch])
-    if (result.ok) ok(`${repo.dir}: deleted local branch ${branch}.`)
-    else fail(`${repo.dir}: could not delete ${branch} (git branch -d failed — it may not be fully merged locally).`)
+    const result = deleteOne(repo, branch)
+    if (result.ok) ok(successMessage(repo, branch))
+    else fail(failureMessage(repo, branch))
   }
 }
 
