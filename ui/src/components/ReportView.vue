@@ -192,7 +192,10 @@ function summaryText(group: ReportGroup): string {
           v-for="(card, index) in block.cards"
           :key="index"
           class="card step"
-          :class="`step--${card.health}`"
+          :class="[
+            `step--${card.health}`,
+            { 'step--wide': block.cards.length === 1 || card.output.length > 12 },
+          ]"
         >
           <header class="step__head">
             <span class="step__mark">{{ mark(card.health) }}</span>
@@ -226,7 +229,11 @@ function summaryText(group: ReportGroup): string {
               :groupable="false"
             />
           </div>
-          <details v-if="card.output.length" class="step__out" :open="card.output.length <= 12">
+          <details
+            v-if="card.output.length"
+            class="step__out"
+            :open="card.output.length <= 12 || card.health === 'fail'"
+          >
             <summary>Output</summary>
             <pre>{{ outputText(card.output) }}</pre>
           </details>
@@ -532,6 +539,14 @@ function summaryText(group: ReportGroup): string {
 
   &__table {
     overflow-x: auto;
+  }
+
+  &--wide {
+    grid-column: 1 / -1;
+  }
+
+  &--wide &__out pre {
+    max-height: 480px;
   }
 
   &__out {

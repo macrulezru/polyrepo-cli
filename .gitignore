@@ -4,3 +4,5 @@ node_modules/
 # polyrepo.config.example.json instead; each user creates their own via
 # `polyrepo setup` (or by copying the example).
 polyrepo.config.json
+
+ui-distr
