@@ -4,9 +4,15 @@ import type { LogBuilder, LogItem } from '../logModel'
 import { itemText } from '../logModel'
 import { buildReport, type Problem, type ReportGroup } from '../reportModel'
 import { stripAnsi } from '../ansi'
-import { navigate } from '../router'
-import { store } from '../store'
+import { resolvePackageDirs, store } from '../store'
+import { changesDependencies, requestExec } from '../actions'
+import { stepsAfter, stepsForProblem, type StepContext } from '../nextSteps'
+import type { RunSummary } from '../api'
+import NextSteps from './NextSteps.vue'
+import LoadingState from './LoadingState.vue'
 import AnsiText from './AnsiText.vue'
+import AuditFixPanel from './AuditFixPanel.vue'
+import ChangesPanel from './ChangesPanel.vue'
 import ReportTable from './ReportTable.vue'
 
 const props = defineProps<{
@@ -14,6 +20,7 @@ const props = defineProps<{
   tick: number
   running: boolean
   command?: string | undefined
+  run?: RunSummary | undefined
   previous?: string[] | null | undefined
 }>()
 const emit = defineEmits<{ showLog: [text?: string] }>()
@@ -45,12 +52,21 @@ function packagesIn(text: string): string[] {
 }
 
 const tableAction = computed(() =>
-  props.command === 'outdated' ? 'Update…' : props.command === 'audit' ? 'Fix…' : undefined,
+  props.command === 'outdated'
+    ? 'Update dependencies…'
+    : props.command === 'audit'
+      ? 'Fix vulnerabilities…'
+      : undefined,
 )
 
 function onTableAction(key: string): void {
   const cmd = props.command === 'audit' ? 'npm audit fix' : 'npm update'
-  navigate('commands', 'exec', { packages: key, o_cmd: cmd })
+  requestExec(key, cmd, {
+    note:
+      props.command === 'audit'
+        ? 'Applies the fixes npm can make without breaking changes.'
+        : 'Updates the dependencies within the ranges in package.json.',
+  })
 }
 
 const empty = computed(() => report.value.blocks.length === 0)
@@ -66,6 +82,66 @@ function outputText(items: LogItem[]): string {
   return items.map(itemText).join('\n')
 }
 
+function ctxFor(problem: Problem): StepContext {
+  const dirs = [...new Set([...resolvePackageDirs(problem.where), ...packagesIn(problem.text)])]
+  return {
+    command: props.command ?? '',
+    dirs,
+    runId: props.run?.id ?? '',
+    options: props.run?.options ?? {},
+  }
+}
+
+const recovery = computed(() => {
+  const run = props.run
+  if (!run || props.running) return []
+  const unfinished =
+    run.status === 'cancelled' ||
+    !!run.error ||
+    (run.status === 'failed' && report.value.problems.length === 0)
+  if (!unfinished) return []
+  return [
+    { id: 'again', label: 'Run again', primary: true, action: { type: 'rerun' as const } },
+    { id: 'log', label: 'Read the log', action: { type: 'log' as const } },
+    {
+      id: 'doctor',
+      label: 'Check your setup (doctor)',
+      hint: 'Looks for a missing tool, a sign-in or a config problem',
+      action: { type: 'form' as const, command: 'doctor', query: {} },
+    },
+  ]
+})
+
+const nextSteps = computed(() => {
+  const run = props.run
+  if (!run || props.running || report.value.fail > 0 || report.value.ok === 0) return []
+  if (run.status === 'cancelled') return []
+  const dirs = report.value.blocks.flatMap((block) =>
+    block.kind === 'steps' ? block.cards.flatMap((card) => resolvePackageDirs(card.title)) : [],
+  )
+  const fromOptions = Array.isArray(run.options.packages) ? run.options.packages.map(String) : []
+  const texts = report.value.blocks.flatMap((block) =>
+    block.kind === 'steps'
+      ? block.cards.flatMap((card) =>
+          card.statuses.map((item) => (item.kind === 'status' ? stripAnsi(item.text) : '')),
+        )
+      : [],
+  )
+  const opened = texts.find((text) => /Opened (PR|MR) #/.test(text))
+  const url = opened ? (/https?:\/\/\S+/.exec(opened)?.[0] ?? '') : ''
+  return stepsAfter(run, [...new Set(dirs.length ? dirs : fromOptions)], url)
+})
+
+function knownDir(dir: string): boolean {
+  return store.packages.some((pkg) => pkg.dir === dir)
+}
+
+function suggestion(card: ReportGroup): string {
+  return card.commands.some((line) => /\baudit\s+fix\b/.test(line))
+    ? 'chore: npm audit fix'
+    : 'chore: update dependencies'
+}
+
 function summaryText(group: ReportGroup): string {
   const parts: string[] = []
   if (group.fail) parts.push(`${group.fail} failed`)
@@ -77,7 +153,7 @@ function summaryText(group: ReportGroup): string {
 
 <template>
   <div class="rep">
-    <p v-if="empty && running" class="muted">Waiting for results…</p>
+    <LoadingState v-if="empty && running" text="Waiting for results…" />
     <p v-else-if="empty" class="muted">This run produced nothing to report.</p>
 
     <div v-if="hasCounts" class="rep__tiles">
@@ -131,8 +207,43 @@ function summaryText(group: ReportGroup): string {
             :href="`#/packages?filter=${encodeURIComponent(dir)}`"
             >{{ dir }}</a
           >
+          <NextSteps
+            :steps="stepsForProblem(stripAnsi(problem.text), problem.level, ctxFor(problem))"
+            :ctx="ctxFor(problem)"
+            @log="emit('showLog', stripAnsi(problem.text))"
+          />
         </li>
       </ul>
+    </section>
+
+    <section v-if="recovery.length" class="card attn attn--next">
+      <h2 class="attn__title">
+        {{ run?.status === 'cancelled' ? 'The run was cancelled' : 'The run did not finish' }}
+      </h2>
+      <p v-if="run?.error" class="muted">{{ run.error }}</p>
+      <NextSteps
+        :steps="recovery"
+        :ctx="{
+          command: command ?? '',
+          dirs: [],
+          runId: run?.id ?? '',
+          options: run?.options ?? {},
+        }"
+        @log="emit('showLog')"
+      />
+    </section>
+
+    <section v-if="nextSteps.length" class="card attn attn--next">
+      <h2 class="attn__title">What next?</h2>
+      <NextSteps
+        :steps="nextSteps"
+        :ctx="{
+          command: command ?? '',
+          dirs: [],
+          runId: run?.id ?? '',
+          options: run?.options ?? {},
+        }"
+      />
     </section>
 
     <template v-for="(block, blockIndex) in report.blocks" :key="blockIndex">
@@ -154,6 +265,7 @@ function summaryText(group: ReportGroup): string {
           :columns="block.table.columns"
           :rows="block.table.rows"
           :action-label="tableAction"
+          :action-icon="command === 'audit' ? 'wrench' : 'sync'"
           @action="onTableAction"
         />
       </div>
@@ -229,6 +341,16 @@ function summaryText(group: ReportGroup): string {
               :groupable="false"
             />
           </div>
+          <AuditFixPanel
+            v-if="card.audit && card.audit.total > 0 && knownDir(card.title)"
+            :audit="card.audit"
+            :dir="card.title"
+          />
+          <ChangesPanel
+            v-if="!running && knownDir(card.title) && changesDependencies(card.commands)"
+            :dir="card.title"
+            :suggested="suggestion(card)"
+          />
           <details
             v-if="card.output.length"
             class="step__out"
@@ -316,6 +438,10 @@ function summaryText(group: ReportGroup): string {
   @include stack($space-2);
   padding: $space-3 $space-4;
   border-color: color-mix(in srgb, var(--warn) 50%, var(--border));
+
+  &--next {
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  }
 
   &__title {
     font-size: $font-size-md;

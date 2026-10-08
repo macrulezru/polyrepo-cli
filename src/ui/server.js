@@ -3,9 +3,10 @@ import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { execFile, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { discoverPackages, readPackageJson } from '../repos.js'
+import { discoverPackages, inspectRepos, readPackageJson } from '../repos.js'
+import { planSave } from '../saveChanges.js'
 import { loadConfig } from '../loadConfig.js'
 import { readConfigFile, resolveConfigFilePath, writeConfigFile } from '../configFile.js'
 import { runWithRuntime } from '../runtime.js'
@@ -201,6 +202,57 @@ function cleanPresets(value) {
   })
 }
 
+function gitRun(cwd, args) {
+  return new Promise((resolve) => {
+    execFile('git', args, { cwd, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
+      resolve({ ok: !error, stdout: String(stdout ?? '').trimEnd(), stderr: String(stderr ?? '').trim() })
+    })
+  })
+}
+
+const TRACKED_NAMES = new Set([
+  'package.json',
+  'package-lock.json',
+  'npm-shrinkwrap.json',
+  'pnpm-lock.yaml',
+  'yarn.lock',
+])
+
+async function findPackage(state, dir) {
+  const { result } = capture(() => loadConfig({ configPath: state.configPath }))
+  const found = describePackages(result).packages.find((pkg) => pkg.dir === dir)
+  if (!found) throw new HttpError(404, `no package named "${dir}"`)
+  return found
+}
+
+function relativeDir(pkg) {
+  return path.relative(pkg.repoPath, pkg.path).split(path.sep).join('/')
+}
+
+function insidePackage(pkg, file) {
+  const dir = path.posix.dirname(file)
+  const rel = relativeDir(pkg)
+  return TRACKED_NAMES.has(path.posix.basename(file)) && (dir === (rel === '' ? '.' : rel) || dir === '.')
+}
+
+async function changedFiles(pkg) {
+  const status = await gitRun(pkg.repoPath, ['status', '--porcelain', '--untracked-files=no'])
+  if (!status.ok) throw new HttpError(500, status.stderr || 'git status failed')
+  return status.stdout
+    .split('\n')
+    .map((line) => line.replace(/\r$/, ''))
+    .filter((line) => line.length > 3)
+    .map((line) => line.slice(3).trim().replace(/^"|"$/g, ''))
+    .filter((file) => insidePackage(pkg, file))
+}
+
+function cleanFiles(body, allowed) {
+  const asked = Array.isArray(body.files) ? body.files.map(String) : []
+  const files = asked.filter((file) => allowed.includes(file))
+  if (files.length === 0) throw new HttpError(409, 'nothing to do: those files have no changes')
+  return files
+}
+
 async function authState() {
   const probe = async (cmd, args) => {
     const result = await runAsync('.', cmd, args)
@@ -331,6 +383,54 @@ export async function startUiServer({
     },
     {
       method: 'GET',
+      path: '/api/repo/changes',
+      handler: async ({ res, url }) => {
+        const pkg = await findPackage(state, url.searchParams.get('dir') ?? '')
+        const files = await changedFiles(pkg)
+        const details = []
+        for (const file of files) {
+          const stat = await gitRun(pkg.repoPath, ['diff', '--numstat', '--', file])
+          const [added, removed] = stat.stdout.split('\t')
+          details.push({ file, added: Number(added) || 0, removed: Number(removed) || 0 })
+        }
+        let diff = ''
+        const manifest = files.find((file) => path.posix.basename(file) === 'package.json')
+        if (manifest) {
+          const text = await gitRun(pkg.repoPath, ['diff', '-U1', '--', manifest])
+          diff = text.stdout.split('\n').slice(0, 200).join('\n')
+        }
+        sendJson(res, 200, { dir: pkg.dir, files: details, diff })
+      },
+    },
+    {
+      method: 'POST',
+      path: '/api/repo/revert',
+      handler: async ({ res, readBody }) => {
+        const body = asObject(await readBody())
+        const pkg = await findPackage(state, String(body.dir ?? ''))
+        const files = cleanFiles(body, await changedFiles(pkg))
+        const result = await gitRun(pkg.repoPath, ['checkout', '--', ...files])
+        if (!result.ok) throw new HttpError(500, result.stderr || 'git checkout failed')
+        sendJson(res, 200, { reverted: files })
+      },
+    },
+    {
+      method: 'GET',
+      path: '/api/repo/commit-plan',
+      handler: async ({ res, url }) => {
+        const dir = url.searchParams.get('dir') ?? ''
+        const scope = url.searchParams.get('scope') === 'all' ? 'all' : 'manifest'
+        const message = url.searchParams.get('message') ?? ''
+        const { result: config } = capture(() => loadConfig({ configPath: state.configPath }))
+        const found = discoverPackages(config).find((repo) => repo.dir === dir)
+        if (!found) throw new HttpError(404, `no package named "${dir}"`)
+        const [repo] = await inspectRepos([found])
+        const plan = await planSave(repo, config, { scope, message })
+        sendJson(res, 200, plan)
+      },
+    },
+    {
+      method: 'GET',
       path: '/api/fs/list',
       handler: ({ res, url }) => {
         const raw = url.searchParams.get('path')
@@ -401,6 +501,7 @@ export async function startUiServer({
           title: typeof body.title === 'string' && body.title ? body.title : entry.title,
           options: { ...options, yes: Array.isArray(options.packages) && options.packages.length > 0 },
           configPath: state.configPath,
+          hidden: body.hidden === true && entry.id === 'list',
         })
         sendJson(res, 202, run)
       },

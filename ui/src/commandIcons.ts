@@ -8,6 +8,7 @@ export const COMMAND_ICONS: Record<string, string> = {
   'sync-deps': 'sync',
   exec: 'terminal',
   clone: 'download',
+  commit: 'check',
   bump: 'bump',
   publish: 'package',
   tag: 'tag',

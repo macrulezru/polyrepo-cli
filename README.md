@@ -93,10 +93,11 @@ before for a plain, one-package-per-repo folder.
   `^`/`~`/exact style), and updates package.json for the ones you pick.
   Only ever edits files on disk — no commit, no push; review and commit
   it yourself afterward.
+- **`commit`** — commit what `npm audit fix`, `npm update` or `sync-deps` left in the working tree (`package.json` and the lock files by default, `--scope all` for every tracked change) without stumbling over branch rules. On a feature branch the commit goes there. On the default branch polyrepo reads the host's rules (GitHub rulesets and branch protection, GitLab protected branches and your role): if direct commits are allowed it commits and pushes, otherwise — or when the rules cannot be read — it creates a branch, commits there, pushes it and opens a PR/MR, leaving the default branch untouched. A direct push that the host refuses anyway moves the commit to a branch for you.
 - **`exec`** — run any command (`npm test`, `npm outdated`, a lint
   script, anything) across every selected package, one at a time, with
   a real terminal.
-- **`ui`** — a local web interface for everything above. Packages show up as one table with the problems called out (local changes, off the main branch, behind npm, stale dependencies) and one-click bulk actions; monorepos are grouped into colored blocks. Every command has a form, with a summary (and an optional dry-run preview) before anything changes repos, and a Release wizard walks through bump, tag and publish. Runs stream live into a report (what needs attention, per-package cards, tables) and a searchable log; a command's questions arrive as dialogs, a run can be cancelled, and every run is kept in a history. Settings edits `polyrepo.config.json` with a folder picker. It listens on `127.0.0.1` only, behind a token in the printed address.
+- **`ui`** — a local web interface for everything above. Packages show up as one table with the problems called out (local changes, off the main branch, behind npm, stale dependencies) and one-click bulk actions; monorepos are grouped into colored blocks, and the table refreshes the packages a command just changed. Every command has a form, with a summary (and an optional dry-run preview) before anything changes repos, and a Release wizard walks through bump, tag and publish. Runs stream live into a report (what needs attention, per-package cards, tables grouped by package) and a searchable log, and the interface suggests what to do next after each outcome: commit or stash a dirty tree, preview or apply `npm audit fix --force`, sign in, run again. A command's questions arrive as dialogs, a run can be cancelled, and every run is kept in a history. Settings edits `polyrepo.config.json` with a folder picker. It listens on `127.0.0.1` only, behind a token in the printed address.
 - Every command that touches multiple repos supports `--packages` and
   `--yes` for fully non-interactive use in scripts.
 
@@ -264,6 +265,8 @@ polyrepo ui --port 4478      # fixed port (default: any free one)
 ```
 
 The page has five sections: **Packages** (the overview table and bulk actions), **Commands** (a form for each command), **Release** (a step-by-step wizard), **Runs** (history, reports and logs) and **Settings** (roots, extra packages, GitLab hosts, the color range for monorepo blocks, saved package sets, sign-in status of `gh`/`glab`/`npm`). `Ctrl+K` opens a palette to jump to a page, a command, a recent run or a package.
+
+After a security audit, each package has a **Fix vulnerabilities…** button. A partly fixed `npm audit fix` is shown as such, with what is left grouped by the update that would fix it, and buttons to preview `--force`, check production dependencies only, update a single dependency or apply `--force` (always after a confirmation). Whatever a command changed in `package.json` or the lock files is shown as a diff, with **Commit…** (which follows the branch rules, see `polyrepo commit`) and **Discard…**.
 
 Every run is kept under `~/.polyrepo/runs` (override with the `POLYREPO_HOME` environment variable), so logs survive a restart; saved sets and UI settings live in `~/.polyrepo/ui.json`. A one-time password for `npm publish` goes into the Publish form (or the Release wizard); `npm login` itself still has to be done once in a terminal.
 

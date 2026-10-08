@@ -322,7 +322,8 @@ onBeforeUnmount(() => clearTimeout(previewTimer))
             </li>
           </ul>
           <p v-if="preview && preview.packages.length === 0" class="muted">
-            Nothing found with these settings.
+            Nothing found with these settings. Add the folder that holds your repositories under
+            Roots, or check that the path exists.
           </p>
         </section>
       </aside>

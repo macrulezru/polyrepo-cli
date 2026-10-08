@@ -48,6 +48,12 @@ function settled(meta) {
   return { ...meta, status: 'failed', error: meta.error ?? 'The run was interrupted when the UI stopped.' }
 }
 
+function runnerEnvironment() {
+  const env = { ...process.env, FORCE_COLOR: '1' }
+  delete env.NO_COLOR
+  return env
+}
+
 function killTree(child) {
   if (!child.pid) return
   if (process.platform === 'win32') {
@@ -69,6 +75,7 @@ export function createRunManager({ directory = runsDirectory(), runner = RUNNER 
   }
 
   function writeMeta(run) {
+    if (run.hidden) return
     fs.mkdirSync(directory, { recursive: true })
     fs.writeFileSync(
       metaPath(run.id),
@@ -110,10 +117,12 @@ export function createRunManager({ directory = runsDirectory(), runner = RUNNER 
     if (event.type === 'step') run.stats.steps += 1
     const entry = { seq: run.seq, event }
     if (run.events.length < MAX_EVENTS) run.events.push(entry)
-    try {
-      fs.appendFileSync(logPath(run.id), `${JSON.stringify(entry)}\n`)
-    } catch {
-      run.persist = false
+    if (!run.hidden) {
+      try {
+        fs.appendFileSync(logPath(run.id), `${JSON.stringify(entry)}\n`)
+      } catch {
+        run.persist = false
+      }
     }
     for (const listener of run.listeners) listener(entry)
   }
@@ -128,10 +137,15 @@ export function createRunManager({ directory = runsDirectory(), runner = RUNNER 
     writeMeta(run)
     for (const listener of run.listeners) listener(null)
     run.listeners.clear()
-    prune()
+    if (run.hidden) {
+      const timer = setTimeout(() => runs.delete(run.id), 10 * 60 * 1000)
+      timer.unref?.()
+    } else {
+      prune()
+    }
   }
 
-  function start({ command, title, options = {}, configPath }) {
+  function start({ command, title, options = {}, configPath, hidden = false }) {
     const id = `${new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14)}-${randomUUID().slice(0, 6)}`
     const run = {
       id,
@@ -140,6 +154,7 @@ export function createRunManager({ directory = runsDirectory(), runner = RUNNER 
       options: Object.fromEntries(Object.entries(options).filter(([key]) => key !== 'otp')),
       startedAt: new Date().toISOString(),
       status: 'running',
+      hidden,
       events: [],
       seq: 0,
       stats: { ok: 0, warn: 0, fail: 0, steps: 0 },
@@ -149,11 +164,13 @@ export function createRunManager({ directory = runsDirectory(), runner = RUNNER 
       pendingQuestions: new Map(),
     }
     runs.set(id, run)
-    fs.mkdirSync(directory, { recursive: true })
-    writeMeta(run)
+    if (!hidden) {
+      fs.mkdirSync(directory, { recursive: true })
+      writeMeta(run)
+    }
 
     const child = fork(runner, [], {
-      env: { ...process.env, FORCE_COLOR: '1', NO_COLOR: '' },
+      env: runnerEnvironment(),
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     })
     run.child = child
@@ -257,9 +274,9 @@ export function createRunManager({ directory = runsDirectory(), runner = RUNNER 
           }
         }
       } catch {
-        return [...runs.values()].map(summarize)
+        return [...runs.values()].filter((run) => !run.hidden).map(summarize)
       }
-      for (const run of runs.values()) map.set(run.id, summarize(run))
+      for (const run of runs.values()) if (!run.hidden) map.set(run.id, summarize(run))
       return [...map.values()].sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)))
     },
     log(id) {

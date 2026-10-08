@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import type { TableCell } from '../api'
 import { stripAnsi } from '../ansi'
-import { groupColor } from '../groupColors'
+import { colorAt, groupColor } from '../groupColors'
 import AnsiText from './AnsiText.vue'
 import Icon from './Icon.vue'
 import StatusChip, { type ChipTone } from './StatusChip.vue'
@@ -22,6 +22,8 @@ const props = withDefaults(
     rowFilter?: ((row: Row) => boolean) | undefined
     initialFilter?: string | undefined
     actionLabel?: string | undefined
+    actionIcon?: string | undefined
+    busyKeys?: string[] | undefined
   }>(),
   { selectable: false, groupable: true, filterable: true },
 )
@@ -49,10 +51,12 @@ interface Entry {
 interface Block {
   name: string
   mono: boolean
+  pkg?: boolean
   entries: Entry[]
 }
 
-const CHIP_COLUMNS = ['Branch', 'Git', 'Release', 'npm', 'Deps']
+const CHIP_COLUMNS = ['Branch', 'Git', 'Release', 'npm', 'Deps', 'Severity']
+const SEVERITY_ORDER = ['critical', 'high', 'moderate', 'low', 'info']
 
 const entries = computed(() => {
   const needle = filter.value.trim().toLowerCase()
@@ -84,7 +88,68 @@ function keyOf(index: number): string {
   return stripAnsi(props.rows[index]?.cells[0]?.text ?? '')
 }
 
+const pkgMode = computed(() => {
+  if (props.selectable || !props.groupable) return false
+  const seen = new Set<string>()
+  for (const row of props.rows) {
+    const key = stripAnsi(row.cells[0]?.text ?? '')
+    if (seen.has(key)) return true
+    seen.add(key)
+  }
+  return false
+})
+
+const shownColumns = computed(() => (pkgMode.value ? props.columns.slice(1) : props.columns))
+const rowAction = computed(() => !pkgMode.value && !!props.actionLabel)
+const offset = computed(() => (pkgMode.value ? 1 : 0))
+
+function cellsOf(row: Row): { cell: TableCell; column: string; index: number }[] {
+  const start = offset.value
+  return row.cells.slice(start).map((cell, i) => ({
+    cell,
+    column: props.columns[i + start] ?? '',
+    index: i + start,
+  }))
+}
+
+function severityRank(text: string): number {
+  const index = SEVERITY_ORDER.indexOf(text)
+  return index < 0 ? 99 : index
+}
+
+function severitySummary(block: Block): { text: string; count: number; cell: TableCell }[] {
+  const column = props.columns.indexOf('Severity')
+  if (column < 0) return []
+  const counts = new Map<string, { count: number; cell: TableCell }>()
+  for (const { row } of block.entries) {
+    const cell = row.cells[column]
+    if (!cell) continue
+    const text = stripAnsi(cell.text).trim().toLowerCase()
+    const known = counts.get(text)
+    if (known) known.count += 1
+    else counts.set(text, { count: 1, cell })
+  }
+  return [...counts.entries()]
+    .sort((a, b) => severityRank(a[0]) - severityRank(b[0]))
+    .map(([text, value]) => ({ text, count: value.count, cell: value.cell }))
+}
+
 const blocks = computed<Block[]>(() => {
+  if (pkgMode.value) {
+    const order: Block[] = []
+    const byKey = new Map<string, Block>()
+    for (const entry of entries.value) {
+      const key = keyOf(entry.index)
+      let block = byKey.get(key)
+      if (!block) {
+        block = { name: key, mono: false, pkg: true, entries: [] }
+        byKey.set(key, block)
+        order.push(block)
+      }
+      block.entries.push(entry)
+    }
+    return order
+  }
   const single: Entry[] = []
   const byName = new Map<string, Block>()
   for (const entry of entries.value) {
@@ -110,7 +175,18 @@ const blocks = computed<Block[]>(() => {
 
 const allNames = computed(() => [...new Set(blocks.value.filter((b) => b.mono).map((b) => b.name))])
 
+const pkgKeys = computed(() => {
+  const seen: string[] = []
+  for (const row of props.rows) {
+    const key = stripAnsi(row.cells[0]?.text ?? '')
+    if (!seen.includes(key)) seen.push(key)
+  }
+  return seen
+})
+
 function colorOf(block: Block): string {
+  if (block.pkg)
+    return colorAt(Math.max(0, pkgKeys.value.indexOf(block.name)), pkgKeys.value.length)
   return groupColor(block.name, allNames.value)
 }
 
@@ -199,29 +275,29 @@ const FALLBACK: Track = { min: 100, fr: 1 }
 const GAP = 12
 
 function trackFor(column: string, index: number): Track {
-  if (index === 0) return TRACKS.Package ?? FALLBACK
+  if (index === 0 && !pkgMode.value) return TRACKS.Package ?? FALLBACK
   return TRACKS[column] ?? FALLBACK
 }
 
 const template = computed(() => {
   const parts = [
     ...(props.selectable ? ['34px'] : []),
-    ...props.columns.map((column, index) => {
+    ...shownColumns.value.map((column, index) => {
       const track = trackFor(column, index)
       return `minmax(${track.min}px, ${track.fr}fr)`
     }),
-    ...(props.actionLabel ? ['auto'] : []),
+    ...(rowAction.value ? ['auto'] : []),
   ]
   return parts.join(' ')
 })
 
 const minWidth = computed(() => {
-  const tracks = props.columns.map((column, index) => trackFor(column, index).min)
-  const count = tracks.length + (props.selectable ? 1 : 0) + (props.actionLabel ? 1 : 0)
+  const tracks = shownColumns.value.map((column, index) => trackFor(column, index).min)
+  const count = tracks.length + (props.selectable ? 1 : 0) + (rowAction.value ? 1 : 0)
   const total =
     tracks.reduce((sum, value) => sum + value, 0) +
     (props.selectable ? 34 : 0) +
-    (props.actionLabel ? 100 : 0)
+    (rowAction.value ? 100 : 0)
   return `${total + (count - 1) * GAP + 24}px`
 })
 </script>
@@ -259,21 +335,23 @@ const minWidth = computed(() => {
         <div class="g g--head" role="row">
           <span v-if="selectable" />
           <button
-            v-for="(column, index) in columns"
+            v-for="(column, shown) in shownColumns"
             :key="column"
             class="g__sort"
-            :aria-sort="sortColumn === index ? (sortDesc ? 'descending' : 'ascending') : 'none'"
-            @click="sortBy(index)"
+            :aria-sort="
+              sortColumn === shown + offset ? (sortDesc ? 'descending' : 'ascending') : 'none'
+            "
+            @click="sortBy(shown + offset)"
           >
             {{ column }}
             <Icon
-              v-if="sortColumn === index"
+              v-if="sortColumn === shown + offset"
               class="g__arrow"
               :name="sortDesc ? 'chevdown' : 'chevup'"
               :size="13"
             />
           </button>
-          <span v-if="actionLabel" />
+          <span v-if="rowAction" />
         </div>
 
         <p v-if="entries.length === 0" class="muted rt__none">No rows match.</p>
@@ -282,10 +360,30 @@ const minWidth = computed(() => {
           v-for="block in blocks"
           :key="block.name || '(single)'"
           class="blk"
-          :class="{ 'blk--mono': block.mono }"
-          :style="block.mono ? { '--gc': colorOf(block) } : undefined"
+          :class="{ 'blk--mono': block.mono || block.pkg }"
+          :style="block.mono || block.pkg ? { '--gc': colorOf(block) } : undefined"
         >
-          <div v-if="block.mono" class="g g--title">
+          <div v-if="block.pkg" class="g g--title g--pkg">
+            <span class="blk__pkgname">{{ block.name }}</span>
+            <span class="blk__count">{{ block.entries.length }} rows</span>
+            <span class="blk__sev">
+              <StatusChip
+                v-for="item in severitySummary(block)"
+                :key="item.text"
+                :tone="chipTone('Severity', item.cell)"
+                >{{ item.count }} {{ item.text }}</StatusChip
+              >
+            </span>
+            <button
+              v-if="actionLabel"
+              class="btn btn--primary blk__action"
+              @click="emit('action', block.name)"
+            >
+              <Icon v-if="actionIcon" :name="actionIcon" :size="16" />
+              {{ actionLabel }}
+            </button>
+          </div>
+          <div v-else-if="block.mono" class="g g--title">
             <span v-if="selectable" class="g__pick">
               <input
                 type="checkbox"
@@ -306,16 +404,19 @@ const minWidth = computed(() => {
               <span class="blk__tag">monorepo</span>
             </button>
           </div>
-          <div v-else-if="blocks.length > 1" class="blk__single-title">
+          <div v-else-if="blocks.length > 1 && !block.pkg" class="blk__single-title">
             Single packages <span class="blk__count">{{ block.entries.length }}</span>
           </div>
 
-          <template v-if="!block.mono || !collapsed.includes(block.name)">
+          <template v-if="block.pkg || !block.mono || !collapsed.includes(block.name)">
             <div
               v-for="{ row, index } in block.entries"
               :key="index"
               class="g g--row"
-              :class="{ 'g--on': picked.includes(keyOf(index)) }"
+              :class="{
+                'g--on': picked.includes(keyOf(index)),
+                'g--busy': busyKeys?.includes(keyOf(index)),
+              }"
               role="row"
             >
               <span v-if="selectable" class="g__pick">
@@ -326,26 +427,26 @@ const minWidth = computed(() => {
                   @change="toggle(keyOf(index))"
                 />
               </span>
-              <template v-for="(cell, cellIndex) in row.cells" :key="cellIndex">
+              <template v-for="item in cellsOf(row)" :key="item.index">
                 <span
-                  v-if="cellIndex === 0"
+                  v-if="item.index === 0"
                   class="g__name"
                   :class="{ 'g__name--member': block.mono }"
                   :title="keyOf(index)"
                   >{{ block.mono ? memberName(index) : keyOf(index) }}</span
                 >
-                <span v-else-if="isChip(columns[cellIndex] ?? '', cell)" class="g__cell">
+                <span v-else-if="isChip(item.column, item.cell)" class="g__cell">
                   <StatusChip
-                    :tone="chipTone(columns[cellIndex] ?? '', cell)"
-                    :title="stripAnsi(cell.text)"
-                    >{{ stripAnsi(cell.text) }}</StatusChip
+                    :tone="chipTone(item.column, item.cell)"
+                    :title="stripAnsi(item.cell.text)"
+                    >{{ stripAnsi(item.cell.text) }}</StatusChip
                   >
                 </span>
-                <span v-else class="g__cell g__cell--text" :title="stripAnsi(cell.text)">
-                  <AnsiText :text="cell.styled" />
+                <span v-else class="g__cell g__cell--text" :title="stripAnsi(item.cell.text)">
+                  <AnsiText :text="item.cell.styled" />
                 </span>
               </template>
-              <span v-if="actionLabel" class="g__cell">
+              <span v-if="rowAction" class="g__cell">
                 <button class="btn btn--small" @click="emit('action', keyOf(index))">
                   {{ actionLabel }}
                 </button>
@@ -435,8 +536,20 @@ const minWidth = computed(() => {
     background: var(--accent-soft) !important;
   }
 
+  &--busy {
+    opacity: 0.55;
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+
   &--title {
     min-height: 40px;
+  }
+
+  &--pkg {
+    display: flex;
+    align-items: center;
+    gap: $space-3;
+    padding: 6px $space-3;
   }
 
   &__sort {
@@ -535,6 +648,22 @@ const minWidth = computed(() => {
     font-size: $font-size-xs;
   }
 
+  &__sev {
+    @include cluster($space-2);
+    margin-left: $space-2;
+  }
+
+  &__action {
+    margin-left: auto;
+  }
+
+  &__pkgname {
+    font-family: $font-mono;
+    font-size: $font-size-md;
+    font-weight: 700;
+    color: var(--gc);
+  }
+
   &__single-title {
     display: flex;
     gap: $space-2;
@@ -542,6 +671,12 @@ const minWidth = computed(() => {
     padding: 8px $space-3;
     background: var(--surface-2);
     font-weight: 600;
+  }
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.9;
   }
 }
 </style>

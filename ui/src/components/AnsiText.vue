@@ -3,19 +3,57 @@ import { computed } from 'vue'
 import { ansiSegments } from '../ansi'
 
 const props = defineProps<{ text: string }>()
-const segments = computed(() => ansiSegments(props.text))
+const URL_PATTERN = /(https?:\/\/[^\s<>"'`)\]]+)/g
+
+interface Part {
+  text: string
+  cls: string
+  href?: string
+}
+
+const segments = computed<Part[]>(() => {
+  const parts: Part[] = []
+  for (const segment of ansiSegments(props.text)) {
+    let last = 0
+    for (const match of segment.text.matchAll(URL_PATTERN)) {
+      const index = match.index ?? 0
+      if (index > last) parts.push({ text: segment.text.slice(last, index), cls: segment.cls })
+      const url = match[0].replace(/[.,;:]+$/, '')
+      parts.push({ text: url, cls: segment.cls, href: url })
+      last = index + url.length
+    }
+    if (last < segment.text.length) {
+      parts.push({ text: segment.text.slice(last), cls: segment.cls })
+    }
+  }
+  return parts
+})
 </script>
 
 <template>
   <span class="ansi"
-    ><span v-for="(segment, index) in segments" :key="index" :class="segment.cls">{{
-      segment.text
-    }}</span></span
+    ><template v-for="(segment, index) in segments" :key="index"
+      ><a
+        v-if="segment.href"
+        class="ansi__link"
+        :class="segment.cls"
+        :href="segment.href"
+        target="_blank"
+        rel="noopener noreferrer"
+        >{{ segment.text }}</a
+      ><span v-else :class="segment.cls">{{ segment.text }}</span></template
+    ></span
   >
 </template>
 
 <style lang="scss">
 .ansi {
+  .ansi__link {
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
   .a-bold {
     font-weight: 700;
   }

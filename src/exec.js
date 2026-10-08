@@ -14,15 +14,18 @@ import { getRuntime } from './runtime.js'
 // instead of capturing it — needed for `npm publish`, which can stop and
 // wait on a real TTY for a 2FA/OTP code. Capturing its output would make
 // that prompt invisible and leave the process hanging forever.
-// On Windows, `npm` (and anything else that resolves to a .cmd/.bat shim
-// instead of a real .exe) can't be spawned directly — CreateProcess doesn't
-// know what to do with a batch file, so spawnSync silently fails to launch
-// it at all (`status` comes back null) unless the shell is involved. `git`
-// and `gh` are real executables and don't need this, but turning it on
-// unconditionally on Windows is the standard fix and is safe here since
-// every arg still goes through spawnSync's own array (each element quoted
-// for the shell), not a hand-built command string.
-const NEEDS_SHELL = process.platform === 'win32'
+const DIRECT_COMMANDS = new Set(['git', 'gh', 'glab', 'node'])
+
+function quoteArg(arg) {
+  if (arg !== '' && /^[\w@%+=:,./\\-]+$/.test(arg)) return arg
+  const escaped = arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')
+  return `"${escaped}"`
+}
+
+export function launchPlan(cmd, args, platform = process.platform) {
+  if (platform !== 'win32' || DIRECT_COMMANDS.has(cmd)) return { file: cmd, args, shell: false }
+  return { file: [cmd, ...args.map(quoteArg)].join(' '), args: [], shell: true }
+}
 
 export function run(cwd, cmd, args, { quiet = false, mutating = false, dryRun = false, interactive = false } = {}) {
   const { reporter } = getRuntime()
@@ -30,11 +33,13 @@ export function run(cwd, cmd, args, { quiet = false, mutating = false, dryRun = 
   if (mutating && dryRun) return { ok: true, stdout: '', stderr: '', status: 0, skipped: true }
 
   if (interactive) {
-    const result = spawnSync(cmd, args, { cwd, stdio: 'inherit', shell: NEEDS_SHELL })
+    const plan = launchPlan(cmd, args)
+    const result = spawnSync(plan.file, plan.args, { cwd, stdio: 'inherit', shell: plan.shell })
     return { ok: result.status === 0, stdout: '', stderr: '', status: result.status }
   }
 
-  const result = spawnSync(cmd, args, { cwd, encoding: 'utf8', shell: NEEDS_SHELL })
+  const plan = launchPlan(cmd, args)
+  const result = spawnSync(plan.file, plan.args, { cwd, encoding: 'utf8', shell: plan.shell })
   const stdout = (result.stdout || '').trim()
   // If the process couldn't even be spawned (bad cwd, command not found),
   // result.error is set and stdout/stderr never got produced — surface that
@@ -72,7 +77,8 @@ const ASYNC_TIMEOUT_MS = 30_000
 export function runAsync(cwd, cmd, args) {
   return new Promise((resolve) => {
     let settled = false
-    const child = spawn(cmd, args, { cwd, shell: NEEDS_SHELL })
+    const plan = launchPlan(cmd, args)
+    const child = spawn(plan.file, plan.args, { cwd, shell: plan.shell })
     let stdout = ''
     let stderr = ''
 

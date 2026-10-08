@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import { gitlabPushPolicy } from './pushPolicy.js'
 import os from 'node:os'
 import path from 'node:path'
 import { run, glab, glabAsync } from '../exec.js'
@@ -45,7 +46,7 @@ function createPr(repo, { base, branch, title, body, dryRun }) {
   if (!result.ok) return { ok: false }
   const match = result.stdout.match(/merge_requests\/(\d+)/)
   if (!match) return { ok: false, message: `Could not parse MR number from: ${result.stdout}` }
-  return { ok: true, number: match[1] }
+  return { ok: true, number: match[1], url: result.stdout.trim().split('\n').pop() }
 }
 
 // `--auto-merge=false` forces an immediate merge attempt even when a
@@ -225,6 +226,7 @@ export const gitlabProvider = {
   listOpenPrsAsync,
   getDefaultBranchAsync,
   isBranchProtectedAsync,
+  getPushPolicyAsync: (repo, branch) => gitlabPushPolicy(branch, (args) => glabAsync(repo.path, args)),
   isPrMergedAsync,
   releaseExistsAsync,
   releaseExists,

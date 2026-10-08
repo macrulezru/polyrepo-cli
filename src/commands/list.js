@@ -11,8 +11,9 @@ import { printTable, heading, ok, fail } from '../ui.js'
 import { startSpinner } from '../spinner.js'
 import { EXPORT_FORMATS, exportTable, inferExportFormat, writeExport } from '../export.js'
 import { line } from '../runtime.js'
+import { filterByNames } from '../filterByNames.js'
 
-export async function listCommand({ configPath, quick = false, showPath = false, format, output } = {}) {
+export async function listCommand({ configPath, quick = false, showPath = false, format, output, packages } = {}) {
   if (format && !EXPORT_FORMATS.includes(format)) {
     fail(`Unknown --format "${format}" — expected one of: ${EXPORT_FORMATS.join(', ')}.`)
     return
@@ -23,7 +24,8 @@ export async function listCommand({ configPath, quick = false, showPath = false,
   }
 
   const config = loadConfig({ configPath })
-  const repos = discoverPackages(config)
+  const found = discoverPackages(config)
+  const repos = packages ? filterByNames(found, packages) : found
   if (repos.length === 0) {
     line(pc.yellow('No repos found.'))
     return

@@ -1,4 +1,5 @@
 import { reactive } from 'vue'
+import { stripAnsi } from './ansi'
 import {
   api,
   type AuthState,
@@ -7,8 +8,10 @@ import {
   type PackageInfo,
   type PackagesResult,
   type Preset,
+  type RunEntry,
   type RunSummary,
   type StatusInfo,
+  type TableCell,
   type UiSettings,
 } from './api'
 
@@ -24,11 +27,25 @@ export const store = reactive({
   presets: [] as Preset[],
   settings: { groupColors: { from: '#4f7bff', to: '#c06be0' } } as UiSettings,
   loadError: '',
+  offline: false,
   paletteOpen: false,
+  patches: {} as Record<string, { columns: string[]; cells: TableCell[]; at: number }>,
+  reportCache: undefined as
+    | {
+        id: string
+        table: { kind: 'table'; columns: string[]; rows: { gap: boolean; cells: TableCell[] }[] }
+      }
+    | undefined,
+  refreshing: [] as string[],
+  reportStale: false,
+  pendingExec: undefined as
+    { dir: string; cmd: string; title: string; note: string; danger: boolean } | undefined,
 })
 
 const known = new Map<string, string>()
 let primed = false
+let primedAt = 0
+let failures = 0
 const baseTitle = document.title
 
 function notify(run: RunSummary): void {
@@ -114,13 +131,27 @@ export async function loadRuns(): Promise<void> {
     for (const run of runs) {
       const before = known.get(run.id)
       const active = run.status === 'running' || run.status === 'waiting'
-      if (primed && before !== undefined && before !== run.status && !active) notify(run)
+      const finishedAfterStart =
+        before === undefined && !!run.finishedAt && new Date(run.finishedAt).getTime() >= primedAt
+      if (
+        primed &&
+        ((before !== undefined && before !== run.status) || finishedAfterStart) &&
+        !active
+      ) {
+        notify(run)
+        void afterRun(run)
+      }
       known.set(run.id, run.status)
     }
+    if (!primed) primedAt = Date.now()
     primed = true
+    failures = 0
+    store.offline = false
     store.runs = runs
     updateTitle()
   } catch {
+    failures += 1
+    if (failures >= 2) store.offline = true
     return
   }
 }
@@ -151,4 +182,97 @@ export async function savePresets(presets: Preset[]): Promise<void> {
 
 export function commandById(id: string): CommandInfo | undefined {
   return store.commands.find((command) => command.id === id)
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function waitFinished(id: string): Promise<void> {
+  for (let attempt = 0; attempt < 240; attempt += 1) {
+    const run = await api.get<RunSummary>(`/api/runs/${id}`)
+    if (run.status !== 'running' && run.status !== 'waiting') return
+    await sleep(800)
+  }
+}
+
+export async function refreshPackages(dirs: string[]): Promise<void> {
+  const unique = [...new Set(dirs)].filter((dir) => store.packages.some((pkg) => pkg.dir === dir))
+  if (unique.length === 0) {
+    await loadPackages()
+    return
+  }
+  store.refreshing = [...new Set([...store.refreshing, ...unique])]
+  try {
+    await loadPackages()
+    const run = await api.post<RunSummary>('/api/runs', {
+      command: 'list',
+      hidden: true,
+      options: { packages: unique },
+    })
+    await waitFinished(run.id)
+    const log = await api.get<RunEntry[]>(`/api/runs/${run.id}/log`)
+    for (const entry of log) {
+      if (entry.event.type !== 'table') continue
+      for (const row of entry.event.rows) {
+        const key = stripAnsi(row.cells[0]?.text ?? '')
+        store.patches[key] = { columns: entry.event.columns, cells: row.cells, at: Date.now() }
+      }
+    }
+  } catch {
+    store.reportStale = true
+  } finally {
+    store.refreshing = store.refreshing.filter((dir) => !unique.includes(dir))
+  }
+}
+
+export function resolvePackageDirs(label: string): string[] {
+  const clean = stripAnsi(label)
+  const bare = clean
+    .replace(/\s*\d[\d.]*(?:-[\w.]+)?\s*→.*$/, '')
+    .replace(/@[^@/\s]+$/, '')
+    .trim()
+  const found = new Set<string>()
+  for (const pkg of store.packages) {
+    if (pkg.dir === clean || pkg.dir === bare || pkg.name === bare || pkg.repoDir === bare) {
+      found.add(pkg.dir)
+    }
+  }
+  return [...found]
+}
+
+async function dirsFromLog(id: string): Promise<string[]> {
+  try {
+    const log = await api.get<RunEntry[]>(`/api/runs/${id}/log`)
+    const found = new Set<string>()
+    for (const entry of log) {
+      if (entry.event.type !== 'step') continue
+      for (const dir of resolvePackageDirs(entry.event.label)) found.add(dir)
+    }
+    return [...found]
+  } catch {
+    return []
+  }
+}
+
+export async function afterRun(run: RunSummary): Promise<void> {
+  const command = commandById(run.command)
+  const changes =
+    !!command?.mutating ||
+    run.options.cleanBranches === true ||
+    run.options.cleanRemoteBranches === true
+  if (!changes || run.options.dryRun === true) return
+  if (run.command === 'clone') {
+    await loadPackages()
+    store.reportStale = true
+    return
+  }
+  let dirs = Array.isArray(run.options.packages) ? run.options.packages.map(String) : []
+  if (dirs.length === 0) dirs = await dirsFromLog(run.id)
+  if (dirs.length === 0) {
+    await loadPackages()
+    store.reportStale = true
+    return
+  }
+  await refreshPackages(dirs)
 }
