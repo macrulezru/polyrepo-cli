@@ -1,4 +1,3 @@
-import { confirm } from '@inquirer/prompts'
 import semver from 'semver'
 import pc from 'picocolors'
 import { discoverPackages, inspectRepos } from '../repos.js'
@@ -10,6 +9,7 @@ import { selectPackages } from '../selectPackages.js'
 import { filterByNames } from '../filterByNames.js'
 import { pMap } from '../pMap.js'
 import { heading, stepHeading, ok, fail, warn, columnWidths, formatRow } from '../ui.js'
+import { confirm, line } from '../runtime.js'
 
 // A plain `npm publish`/`pnpm publish` always tags the published version
 // "latest" on the registry unless told otherwise — including a prerelease
@@ -24,7 +24,7 @@ export function distTagFor(version, override) {
   return semver.prerelease(version) ? 'next' : undefined
 }
 
-export async function publishCommand({ configPath, packages, yes = false, dryRun = false, distTag } = {}) {
+export async function publishCommand({ configPath, packages, yes = false, dryRun = false, distTag, otp } = {}) {
   const config = loadConfig({ configPath })
   // A private package (e.g. a pnpm workspace's own root manifest, or a
   // workspace member like a playground app) never belongs in this list —
@@ -32,7 +32,7 @@ export async function publishCommand({ configPath, packages, yes = false, dryRun
   // against the registry or offer in the checkbox.
   const allRepos = (await inspectRepos(discoverPackages(config))).filter((r) => r.version && !r.private)
   if (allRepos.length === 0) {
-    console.log(pc.yellow('No repos found.'))
+    line(pc.yellow('No repos found.'))
     return
   }
 
@@ -43,11 +43,11 @@ export async function publishCommand({ configPath, packages, yes = false, dryRun
   // nobody asked to publish.
   const repos = filterByNames(allRepos, packages)
   if (repos.length === 0) {
-    console.log(pc.dim('Nothing selected.'))
+    line(pc.dim('Nothing selected.'))
     return
   }
 
-  console.log(pc.dim(`Checking ${repos.length} package(s) against the registry...`))
+  line(pc.dim(`Checking ${repos.length} package(s) against the registry...`))
   // Also fetches each repo's origin default branch (once per physical repo
   // — a pnpm workspace's several members share one fetch) so the check
   // below can compare local against origin too, not just against npm.
@@ -67,7 +67,7 @@ export async function publishCommand({ configPath, packages, yes = false, dryRun
     const needsPublish = published !== r.version
     const resolvedDistTag = distTagFor(r.version, distTag)
     const originNote = originVersion != null && originVersion !== r.version ? pc.yellow(` (origin has ${originVersion})`) : ''
-    console.log(
+    line(
       pc.dim(`  ${r.dir}: registry ${published ?? '(not published)'} ${needsPublish ? '≠' : '='} local ${r.version}`) +
         originNote,
     )
@@ -103,7 +103,7 @@ export async function publishCommand({ configPath, packages, yes = false, dryRun
   })
 
   if (selected.length === 0) {
-    console.log(pc.dim('Nothing selected.'))
+    line(pc.dim('Nothing selected.'))
     return
   }
 
@@ -115,7 +115,7 @@ export async function publishCommand({ configPath, packages, yes = false, dryRun
       default: true,
     })
     if (!proceed) {
-      console.log(pc.dim('Cancelled.'))
+      line(pc.dim('Cancelled.'))
       return
     }
   }
@@ -127,7 +127,7 @@ export async function publishCommand({ configPath, packages, yes = false, dryRun
   for (const repo of selected) {
     index += 1
     stepHeading(index, selected.length, `${repo.name}@${repo.version}`)
-    await publishOne(repo, { dryRun })
+    await publishOne(repo, { dryRun, otp })
   }
 }
 
@@ -155,9 +155,9 @@ function warnIfPublishingOffBranch(selected) {
 // reimplementing the npm-vs-pnpm / dist-tag / dry-run logic. Callers are
 // responsible for ensureNpmLogin/ensureWorkspacesInstalled beforehand (once
 // per batch, not per package) and for printing their own step header.
-export async function publishOne(repo, { dryRun = false, distTag } = {}) {
+export async function publishOne(repo, { dryRun = false, distTag, otp } = {}) {
   const resolvedDistTag = repo.distTag ?? distTagFor(repo.version, distTag)
-  const tagArgs = resolvedDistTag ? ['--tag', resolvedDistTag] : []
+  const tagArgs = [...(resolvedDistTag ? ['--tag', resolvedDistTag] : []), ...(otp ? ['--otp', otp] : [])]
   // Real terminal, not captured — npm/pnpm publish can stop for a 2FA/OTP
   // prompt, and --dry-run does a full dry run including packing, so this
   // exercises the same path as a real publish. A pnpm workspace member
@@ -191,7 +191,7 @@ export async function publishOne(repo, { dryRun = false, distTag } = {}) {
 export async function ensureWorkspacesInstalled(selected) {
   const repoPaths = [...new Set(selected.filter((r) => r.isWorkspaceMember).map((r) => r.repoPath))]
   for (const repoPath of repoPaths) {
-    console.log(pc.dim(`Running \`pnpm install\` in ${repoPath} to link workspace dependencies...`))
+    line(pc.dim(`Running \`pnpm install\` in ${repoPath} to link workspace dependencies...`))
     const result = pnpm(repoPath, ['install'], { interactive: true })
     if (!result.ok) {
       fail(`pnpm install failed in ${repoPath} (exit ${result.status}) — aborting before publishing anything.`)

@@ -1,5 +1,5 @@
-import { checkbox } from '@inquirer/prompts'
 import pc from 'picocolors'
+import { checkbox, line } from './runtime.js'
 import { promptTheme } from './ui.js'
 import { filterByNames } from './filterByNames.js'
 
@@ -25,7 +25,7 @@ export async function selectPackages({ items, packages, message, buildChoice, pa
   // is the backstop so a command that doesn't ends in a clean message
   // instead of a raw ValidationError stack trace.
   if (choices.length > 0 && choices.every((c) => c.disabled)) {
-    console.log(pc.yellow('Nothing selectable — every item is disabled.'))
+    line(pc.yellow('Nothing selectable — every item is disabled.'))
     return []
   }
 

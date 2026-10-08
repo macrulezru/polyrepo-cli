@@ -18,6 +18,7 @@ import { auditCommand } from './commands/audit.js'
 import { prsCommand } from './commands/prs.js'
 import { cloneCommand } from './commands/clone.js'
 import { syncDepsCommand } from './commands/syncDeps.js'
+import { uiCommand } from './ui/command.js'
 
 // Read once from package.json rather than a literal string here — the two
 // silently drifted apart before (this file said 1.0.0 while package.json
@@ -802,6 +803,37 @@ Examples:
       yes: Boolean(opts.yes),
       bail: Boolean(opts.bail),
       cmd,
+    }),
+  )
+
+program
+  .command('ui')
+  .description('Start a local web interface for everything above and open it in the browser.')
+  .option('--port <n>', 'Port to listen on (0 picks a free one).', '0')
+  .option('--host <address>', 'Address to listen on; keep the default to stay on this machine.', '127.0.0.1')
+  .option('--no-open', 'Only print the address, do not open the browser.')
+  .option('--token <value>', 'Use this access token instead of a random one (for development).')
+  .addHelpText(
+    'after',
+    `
+Runs the same commands as the terminal, with checkboxes, forms and a live log
+instead of prompts. The server listens on this machine only, behind a one-time
+token in the printed address, and anything that changes a repo asks for an
+explicit confirmation first.
+
+Examples:
+  $ polyrepo ui                 Start it and open the browser
+  $ polyrepo ui --no-open       Only print the address
+`,
+  )
+  .action((opts) =>
+    uiCommand({
+      configPath: program.opts().config,
+      host: opts.host,
+      port: opts.port,
+      open: opts.open,
+      token: opts.token,
+      version: CLI_VERSION,
     }),
   )
 

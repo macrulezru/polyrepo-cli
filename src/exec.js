@@ -1,5 +1,5 @@
 import { spawnSync, spawn } from 'node:child_process'
-import pc from 'picocolors'
+import { getRuntime } from './runtime.js'
 
 // Runs a command, always printing what ran and its output so the caller
 // never has to wait for a whole queue to finish before seeing progress —
@@ -25,8 +25,8 @@ import pc from 'picocolors'
 const NEEDS_SHELL = process.platform === 'win32'
 
 export function run(cwd, cmd, args, { quiet = false, mutating = false, dryRun = false, interactive = false } = {}) {
-  const prefix = mutating && dryRun ? pc.magenta('  [dry-run] $ ') : pc.dim('  $ ')
-  if (!quiet) console.log(`${prefix}${cmd} ${args.join(' ')}`)
+  const { reporter } = getRuntime()
+  if (!quiet) reporter.command({ cmd, args: args.map((arg, index) => (args[index - 1] === '--otp' ? '******' : arg)), mutating, dryRun })
   if (mutating && dryRun) return { ok: true, stdout: '', stderr: '', status: 0, skipped: true }
 
   if (interactive) {
@@ -41,8 +41,8 @@ export function run(cwd, cmd, args, { quiet = false, mutating = false, dryRun = 
   // instead of silently reporting an empty failure.
   const stderr = (result.stderr || '').trim() || (result.error ? result.error.message : '')
   if (!quiet) {
-    if (stdout) console.log(indent(stdout))
-    if (stderr) console.log(indent(stderr))
+    if (stdout) reporter.output(indent(stdout))
+    if (stderr) reporter.output(indent(stderr))
   }
   const ok = result.status === 0
   return { ok, stdout, stderr, status: result.status }

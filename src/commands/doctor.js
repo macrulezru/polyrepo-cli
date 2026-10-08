@@ -1,4 +1,3 @@
-import { checkbox, confirm } from '@inquirer/prompts'
 import pc from 'picocolors'
 import { discoverRepos, discoverPackages, inspectRepos } from '../repos.js'
 import { loadConfig } from '../loadConfig.js'
@@ -9,6 +8,7 @@ import { pMap } from '../pMap.js'
 import { ALL_PROVIDERS, providerFor, providerNameFor } from '../providers/index.js'
 import { heading, ok, fail, warn, columnWidths, formatRow, promptTheme } from '../ui.js'
 import { startSpinner } from '../spinner.js'
+import { checkbox, confirm, line } from '../runtime.js'
 
 export async function doctorCommand({ configPath, cleanBranches = false, cleanRemoteBranches = false } = {}) {
   // Discovered before printing "Environment" (unlike every other section
@@ -37,7 +37,7 @@ export async function doctorCommand({ configPath, cleanBranches = false, cleanRe
   checkNpm()
 
   heading('Config')
-  console.log(pc.dim(`Config file: ${config.configPath}`))
+  line(pc.dim(`Config file: ${config.configPath}`))
   if (repos.length === 0) {
     fail('No packages discovered — check `polyrepo setup`.')
   } else {
@@ -60,28 +60,28 @@ export async function doctorCommand({ configPath, cleanBranches = false, cleanRe
   if (repos.length > 0) {
     await checkRemoteSync(repos, config)
   } else {
-    console.log(pc.dim('Skipped — no packages discovered.'))
+    line(pc.dim('Skipped — no packages discovered.'))
   }
 
   heading('Branch sync')
   if (repos.length > 0) {
     await checkBranchSync(repos)
   } else {
-    console.log(pc.dim('Skipped — no packages discovered.'))
+    line(pc.dim('Skipped — no packages discovered.'))
   }
 
   heading('Branch protection')
   if (repos.length > 0) {
     await checkBranchProtection(repos, config)
   } else {
-    console.log(pc.dim('Skipped — no packages discovered.'))
+    line(pc.dim('Skipped — no packages discovered.'))
   }
 
   heading('Stale bump branches')
   if (repos.length > 0) {
     await checkStaleBumpBranches(repos, { cleanBranches, cleanRemoteBranches, config })
   } else {
-    console.log(pc.dim('Skipped — no packages discovered.'))
+    line(pc.dim('Skipped — no packages discovered.'))
   }
 
   heading('Cross-package dependencies')
@@ -103,7 +103,7 @@ export async function doctorCommand({ configPath, cleanBranches = false, cleanRe
       }
     }
   } else {
-    console.log(pc.dim('Skipped — no packages discovered.'))
+    line(pc.dim('Skipped — no packages discovered.'))
   }
 }
 
@@ -134,7 +134,7 @@ async function checkRemoteSync(repos, config) {
 
   const checked = results.filter((r) => r.actual)
   if (checked.length === 0) {
-    console.log(pc.dim('Default branch: skipped — could not reach the host for any package (offline, `gh`/`glab` not authenticated, or no recognized host).'))
+    line(pc.dim('Default branch: skipped — could not reach the host for any package (offline, `gh`/`glab` not authenticated, or no recognized host).'))
   } else {
     const drifted = checked.filter((r) => r.actual !== r.repo.defaultBranch)
     for (const { repo, actual } of drifted) {
@@ -150,7 +150,7 @@ async function checkRemoteSync(repos, config) {
     }
     const uncheckedCount = repos.length - checked.length
     if (uncheckedCount > 0) {
-      console.log(pc.dim(`  (${uncheckedCount} package(s) could not be checked against their host.)`))
+      line(pc.dim(`  (${uncheckedCount} package(s) could not be checked against their host.)`))
     }
   }
 
@@ -206,7 +206,7 @@ async function checkBranchSync(repos) {
     )
   }
   if (aheadOnly.length > 0) {
-    console.log(
+    line(
       pc.dim(
         `${aheadOnly.length} repo(s) have local commits not yet pushed to origin: ${aheadOnly.map((r) => r.repo.dir).join(', ')}`,
       ),
@@ -233,7 +233,7 @@ async function checkBranchProtection(repos, config) {
 
   const checked = results.filter(Boolean)
   if (checked.length === 0) {
-    console.log(pc.dim('Skipped — could not reach the host for any package (offline, `gh`/`glab` not authenticated, or no recognized host).'))
+    line(pc.dim('Skipped — could not reach the host for any package (offline, `gh`/`glab` not authenticated, or no recognized host).'))
     return
   }
 
@@ -247,7 +247,7 @@ async function checkBranchProtection(repos, config) {
 
   const uncheckedCount = repos.length - checked.length
   if (uncheckedCount > 0) {
-    console.log(pc.dim(`  (${uncheckedCount} package(s) could not be checked against their host.)`))
+    line(pc.dim(`  (${uncheckedCount} package(s) could not be checked against their host.)`))
   }
 }
 
@@ -356,13 +356,13 @@ async function promptAndDeleteBranches(stale, { message, confirmMessage, deleteO
   const selected = await checkbox({ message, pageSize: 20, theme: promptTheme, choices })
 
   if (selected.length === 0) {
-    console.log(pc.dim('Nothing selected.'))
+    line(pc.dim('Nothing selected.'))
     return
   }
 
   const proceed = await confirm({ message: confirmMessage(selected.length), default: true })
   if (!proceed) {
-    console.log(pc.dim('Cancelled.'))
+    line(pc.dim('Cancelled.'))
     return
   }
 

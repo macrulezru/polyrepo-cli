@@ -4,6 +4,7 @@ import pc from 'picocolors'
 import { gitAsync } from './exec.js'
 import { pMap } from './pMap.js'
 import { pnpmWorkspaceGlobs, resolveWorkspaceMembers } from './workspaces.js'
+import { line } from './runtime.js'
 
 export function isRepo(dirPath) {
   return fs.existsSync(path.join(dirPath, 'package.json')) && fs.existsSync(path.join(dirPath, '.git'))
@@ -68,7 +69,7 @@ export function discoverRepos(config) {
 
   for (const root of config.roots) {
     if (!fs.existsSync(root)) {
-      console.log(pc.yellow(`Configured root does not exist, skipping: ${root}`))
+      line(pc.yellow(`Configured root does not exist, skipping: ${root}`))
       continue
     }
     const entries = fs.readdirSync(root, { withFileTypes: true })
@@ -82,11 +83,11 @@ export function discoverRepos(config) {
 
   for (const pkgDir of config.packages) {
     if (!fs.existsSync(pkgDir)) {
-      console.log(pc.yellow(`Configured package folder does not exist, skipping: ${pkgDir}`))
+      line(pc.yellow(`Configured package folder does not exist, skipping: ${pkgDir}`))
       continue
     }
     if (!isRepo(pkgDir)) {
-      console.log(pc.yellow(`Configured package folder has no package.json/.git, skipping: ${pkgDir}`))
+      line(pc.yellow(`Configured package folder has no package.json/.git, skipping: ${pkgDir}`))
       continue
     }
     addRepo(pkgDir)

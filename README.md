@@ -96,6 +96,7 @@ before for a plain, one-package-per-repo folder.
 - **`exec`** — run any command (`npm test`, `npm outdated`, a lint
   script, anything) across every selected package, one at a time, with
   a real terminal.
+- **`ui`** — a local web interface for everything above. Packages show up as one table with the problems called out (local changes, off the main branch, behind npm, stale dependencies) and one-click bulk actions; monorepos are grouped into colored blocks. Every command has a form, with a summary (and an optional dry-run preview) before anything changes repos, and a Release wizard walks through bump, tag and publish. Runs stream live into a report (what needs attention, per-package cards, tables) and a searchable log; a command's questions arrive as dialogs, a run can be cancelled, and every run is kept in a history. Settings edits `polyrepo.config.json` with a folder picker. It listens on `127.0.0.1` only, behind a token in the printed address.
 - Every command that touches multiple repos supports `--packages` and
   `--yes` for fully non-interactive use in scripts.
 
@@ -148,6 +149,7 @@ Without `npm link`, run commands as `node src/index.js <command>`.
 polyrepo setup      # tell it where your package repos live
 polyrepo doctor     # confirm the environment is set up correctly
 polyrepo list       # see version/branch/tag/release/npm status for everything
+polyrepo ui         # or do all of it in the browser
 ```
 
 Every command has built-in `--help` (`polyrepo --help`, `polyrepo bump --help`)
@@ -249,10 +251,24 @@ named:
   ✓ Discarded local changes — now on master, matching origin.
 ```
 
+## Web interface
+
+```bash
+polyrepo ui                  # opens the browser
+polyrepo ui --no-open        # just print the address
+polyrepo ui --port 4478      # fixed port (default: any free one)
+```
+
+The page has five sections: **Packages** (the overview table and bulk actions), **Commands** (a form for each command), **Release** (a step-by-step wizard), **Runs** (history, reports and logs) and **Settings** (roots, extra packages, GitLab hosts, the color range for monorepo blocks, saved package sets, sign-in status of `gh`/`glab`/`npm`). `Ctrl+K` opens a palette to jump to a page, a command, a recent run or a package.
+
+Every run is kept under `~/.polyrepo/runs` (override with the `POLYREPO_HOME` environment variable), so logs survive a restart; saved sets and UI settings live in `~/.polyrepo/ui.json`. A one-time password for `npm publish` goes into the Publish form (or the Release wizard); `npm login` itself still has to be done once in a terminal.
+
 ## Development
 
 ```bash
 npm test
+npm run dev:ui      # interface with hot reload, against a running `polyrepo ui`
+npm run build:ui    # builds the interface into ui-dist/
 ```
 
 ---

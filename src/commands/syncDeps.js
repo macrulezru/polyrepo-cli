@@ -1,4 +1,3 @@
-import { checkbox, confirm } from '@inquirer/prompts'
 import pc from 'picocolors'
 import { discoverPackages, inspectRepos } from '../repos.js'
 import { loadConfig } from '../loadConfig.js'
@@ -6,6 +5,7 @@ import { findStaleLocalDeps } from '../crossDeps.js'
 import { updatedRange, applyRangeUpdate } from '../depRanges.js'
 import { heading, ok, fail, columnWidths, formatRow, promptTheme } from '../ui.js'
 import { startSpinner } from '../spinner.js'
+import { checkbox, confirm, line } from '../runtime.js'
 
 // `findStaleLocalDeps` (see doctor's "Cross-package dependencies" section,
 // and the Deps column in `list`) already finds exactly this — a local
@@ -31,7 +31,7 @@ export async function syncDepsCommand({ configPath, packages, yes = false, dryRu
   spinner.stop()
 
   if (allRepos.length === 0) {
-    console.log(pc.yellow('No repos found.'))
+    line(pc.yellow('No repos found.'))
     return
   }
 
@@ -63,7 +63,7 @@ export async function syncDepsCommand({ configPath, packages, yes = false, dryRu
     // every one of their issues, no checkbox, matches how every other
     // command treats an explicit --packages list.
     selected = withUpdate
-    for (const issue of selected) console.log(`  ${formatRow(issue, columns, widths)}`)
+    for (const issue of selected) line(`  ${formatRow(issue, columns, widths)}`)
   } else {
     const choices = withUpdate.map((issue) => ({ name: formatRow(issue, columns, widths), value: issue, checked: true }))
     selected = await checkbox({
@@ -75,7 +75,7 @@ export async function syncDepsCommand({ configPath, packages, yes = false, dryRu
   }
 
   if (selected.length === 0) {
-    console.log(pc.dim('Nothing selected.'))
+    line(pc.dim('Nothing selected.'))
     return
   }
 
@@ -85,14 +85,14 @@ export async function syncDepsCommand({ configPath, packages, yes = false, dryRu
       default: true,
     })
     if (!proceed) {
-      console.log(pc.dim('Cancelled.'))
+      line(pc.dim('Cancelled.'))
       return
     }
   }
 
   for (const issue of selected) {
     if (dryRun) {
-      console.log(pc.magenta(`  [dry-run] would update ${issue.repo.dir}: "${issue.depName}" "${issue.range}" → "${issue.newRange}"`))
+      line(pc.magenta(`  [dry-run] would update ${issue.repo.dir}: "${issue.depName}" "${issue.range}" → "${issue.newRange}"`))
       continue
     }
     const result = applyRangeUpdate(issue.repo.pkgPath, issue.depName, issue.range, issue.newRange)

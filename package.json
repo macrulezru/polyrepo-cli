@@ -1,6 +1,6 @@
 {
   "name": "polyrepo-cli",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "Interactive CLI for managing a folder of local npm package repos: version bumps through a PR, npm publish, GitHub releases, and cross-package dependency drift checks — all from one tool.",
   "homepage": "https://npm.vuecraft.ru/en/packages/polyrepo-cli/",
   "type": "module",
@@ -11,7 +11,11 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "build:ui": "vite build --config ui/vite.config.ts",
+    "dev:ui": "node ui/dev.mjs",
+    "typecheck:ui": "vue-tsc --noEmit -p ui/tsconfig.json",
+    "format:ui": "prettier --write ui"
   },
   "keywords": [
     "cli",
@@ -39,5 +43,15 @@
     "commander": "^12.1.0",
     "picocolors": "^1.1.1",
     "semver": "^7.8.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "@vitejs/plugin-vue": "^6.0.9",
+    "prettier": "^3.9.9",
+    "sass": "^1.105.1",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.3",
+    "vue": "^3.5.43",
+    "vue-tsc": "^3.3.12"
   }
 }

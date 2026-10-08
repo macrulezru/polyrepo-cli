@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import pc from 'picocolors'
 import { resolveConfigFilePath, readConfigFile, DEFAULT_CONFIG_PATH } from './configFile.js'
+import { line } from './runtime.js'
 
 // No hardcoded fallback path — a folder that makes sense on one person's
 // machine (an old default here used to be a Windows-only path) is either
@@ -34,7 +35,7 @@ export function loadConfig({ configPath } = {}) {
     try {
       raw = readConfigFile(resolvedPath)
     } catch (err) {
-      console.log(pc.red(`Could not read config at ${resolvedPath}: ${err.message}`))
+      line(pc.red(`Could not read config at ${resolvedPath}: ${err.message}`))
       raw = EMPTY_CONFIG
       baseDir = path.dirname(DEFAULT_CONFIG_PATH)
     }
@@ -42,9 +43,9 @@ export function loadConfig({ configPath } = {}) {
     // An explicit --config / POLYREPO_CONFIG path was given but doesn't exist —
     // that's almost certainly a typo, worth a loud warning rather than a
     // silent fallback.
-    console.log(pc.red(`Config file not found: ${resolvedPath}`))
+    line(pc.red(`Config file not found: ${resolvedPath}`))
   } else {
-    console.log(pc.yellow(`No config found at ${resolvedPath} — run \`polyrepo setup\` to add package directories.`))
+    line(pc.yellow(`No config found at ${resolvedPath} — run \`polyrepo setup\` to add package directories.`))
   }
 
   // POLYREPO_ROOT is a lighter-weight override for a single one-off run — it

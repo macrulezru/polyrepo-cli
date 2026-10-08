@@ -1,4 +1,3 @@
-import { confirm } from '@inquirer/prompts'
 import pc from 'picocolors'
 import { discoverPackages, inspectRepos, readPackageJson } from '../repos.js'
 import { loadConfig } from '../loadConfig.js'
@@ -10,6 +9,7 @@ import { filterByNames } from '../filterByNames.js'
 import { pMap } from '../pMap.js'
 import { heading, stepHeading, ok, fail, warn, columnWidths, formatRow } from '../ui.js'
 import { releaseOne } from './release.js'
+import { confirm, line } from '../runtime.js'
 
 // For packages whose version was bumped outside `polyrepo bump` (or before `bump`
 // started tagging), there's no `v<version>` tag yet — `polyrepo release` refuses
@@ -22,7 +22,7 @@ export async function tagCommand({ configPath, packages, yes = false, dryRun = f
   const config = loadConfig({ configPath })
   const allRepos = (await inspectRepos(discoverPackages(config))).filter((r) => r.version)
   if (allRepos.length === 0) {
-    console.log(pc.yellow('No repos found.'))
+    line(pc.yellow('No repos found.'))
     return
   }
 
@@ -33,11 +33,11 @@ export async function tagCommand({ configPath, packages, yes = false, dryRun = f
   // about.
   const repos = filterByNames(allRepos, packages)
   if (repos.length === 0) {
-    console.log(pc.dim('Nothing selected.'))
+    line(pc.dim('Nothing selected.'))
     return
   }
 
-  console.log(pc.dim(`Checking ${repos.length} package(s) for an existing tag...`))
+  line(pc.dim(`Checking ${repos.length} package(s) for an existing tag...`))
   // Also fetches each repo's origin default branch (once per physical repo)
   // so the check below can flag when the local version this would tag
   // differs from what's actually on origin — genuinely worth knowing here
@@ -52,7 +52,7 @@ export async function tagCommand({ configPath, packages, yes = false, dryRun = f
     const tag = tagFor(r)
     const [alreadyTagged, originVersion] = await Promise.all([tagExistsAsync(r, tag), readOriginVersionAsync(r)])
     const originNote = originVersion != null && originVersion !== r.version ? pc.yellow(` (origin has ${originVersion})`) : ''
-    console.log(pc.dim(`  ${r.dir}: ${tag} — ${alreadyTagged ? 'already tagged' : 'not tagged yet'}`) + originNote)
+    line(pc.dim(`  ${r.dir}: ${tag} — ${alreadyTagged ? 'already tagged' : 'not tagged yet'}`) + originNote)
     return { ...r, tag, alreadyTagged, originVersion }
   })
 
@@ -82,7 +82,7 @@ export async function tagCommand({ configPath, packages, yes = false, dryRun = f
   })
 
   if (selected.length === 0) {
-    console.log(pc.dim('Nothing selected.'))
+    line(pc.dim('Nothing selected.'))
     return
   }
 
@@ -92,7 +92,7 @@ export async function tagCommand({ configPath, packages, yes = false, dryRun = f
       default: true,
     })
     if (!proceed) {
-      console.log(pc.dim('Cancelled.'))
+      line(pc.dim('Cancelled.'))
       return
     }
   }

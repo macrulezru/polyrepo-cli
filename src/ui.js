@@ -1,4 +1,5 @@
 import pc from 'picocolors'
+import { getRuntime } from './runtime.js'
 
 // Column width/row-formatting is shared by `printTable` (the `list` output)
 // and by the checkbox choice labels in `bump`/`switch-default`/`publish` —
@@ -34,42 +35,27 @@ export function formatRow(row, columns, widths, separator = '  ') {
 // only looks at adjacent rows, it doesn't sort.
 export function printTable(rows, columns, { groupBy } = {}) {
   const widths = columnWidths(rows, columns)
-  const header = columns.map((col, i) => (col.label ?? '').padEnd(widths[i])).join('  ')
-  console.log('')
-  console.log(pc.bold(header))
-  console.log(pc.dim(widths.map((w) => '-'.repeat(w)).join('  ')))
-  let lastGroup
-  rows.forEach((row, i) => {
-    if (groupBy) {
-      const group = groupBy(row)
-      if (i > 0 && group !== lastGroup) console.log('')
-      lastGroup = group
-    }
-    console.log(formatRow(row, columns, widths))
-  })
+  getRuntime().reporter.table({ rows, columns, groupBy, widths, formatRow })
 }
 
 export function heading(text) {
-  console.log('')
-  console.log(pc.bold(pc.cyan(text)))
-  console.log('')
+  getRuntime().reporter.heading(text)
 }
 
 export function stepHeading(index, total, label) {
-  console.log('')
-  console.log(pc.bold(pc.blue(`[${index}/${total}] ${label}`)))
+  getRuntime().reporter.step(index, total, label)
 }
 
 export function ok(text) {
-  console.log(pc.green(`  ✓ ${text}`))
+  getRuntime().reporter.ok(text)
 }
 
 export function fail(text) {
-  console.log(pc.red(`  ✗ ${text}`))
+  getRuntime().reporter.fail(text)
 }
 
 export function warn(text) {
-  console.log(pc.yellow(`  ! ${text}`))
+  getRuntime().reporter.warn(text)
 }
 
 // Shared theme for every `checkbox`/`select` prompt in this CLI:

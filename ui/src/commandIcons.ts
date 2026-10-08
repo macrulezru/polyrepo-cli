@@ -1,0 +1,15 @@
+export const COMMAND_ICONS: Record<string, string> = {
+  list: 'layers',
+  outdated: 'outdated',
+  audit: 'audit',
+  prs: 'prs',
+  doctor: 'doctor',
+  'switch-default': 'branch',
+  'sync-deps': 'sync',
+  exec: 'terminal',
+  clone: 'download',
+  bump: 'bump',
+  publish: 'package',
+  tag: 'tag',
+  release: 'flag',
+}
