@@ -1,6 +1,7 @@
 import { computed, onBeforeUnmount, reactive, ref, shallowRef, watch, type Ref } from 'vue'
 import { api, type Question, type RunEntry, type RunEvent, type RunSummary } from '../api'
 import { LogBuilder } from '../logModel'
+import { loadRuns } from '../store'
 
 export interface PendingPrompt {
   id: number
@@ -13,6 +14,7 @@ export function useRun(runId: Ref<string>) {
   const tick = ref(0)
   const prompts = reactive(new Map<number, Question>())
   const connected = ref(false)
+  const loaded = ref(false)
   const error = ref('')
   const eventCount = ref(0)
 
@@ -43,6 +45,7 @@ export function useRun(runId: Ref<string>) {
         summary.value = { ...summary.value, status: 'running' }
     } else if (event.type === 'done') {
       prompts.clear()
+      void loadRuns()
       if (summary.value) {
         summary.value = {
           ...summary.value,
@@ -87,12 +90,16 @@ export function useRun(runId: Ref<string>) {
     }
     source.addEventListener('end', () => {
       ended = true
+      loaded.value = true
       close()
       void refreshSummary()
     })
     source.onerror = () => {
       connected.value = false
-      if (!ended && source?.readyState === EventSource.CLOSED) close()
+      if (!ended && source?.readyState === EventSource.CLOSED) {
+        loaded.value = true
+        close()
+      }
     }
   }
 
@@ -104,6 +111,7 @@ export function useRun(runId: Ref<string>) {
     eventCount.value = 0
     error.value = ''
     summary.value = undefined
+    loaded.value = false
     tick.value += 1
   }
 
@@ -111,9 +119,13 @@ export function useRun(runId: Ref<string>) {
     runId,
     async (id) => {
       reset()
-      if (!id) return
+      if (!id) {
+        loaded.value = true
+        return
+      }
       await refreshSummary()
       if (summary.value) open()
+      else loaded.value = true
     },
     { immediate: true },
   )
@@ -148,5 +160,17 @@ export function useRun(runId: Ref<string>) {
     }
   }
 
-  return { summary, builder, tick, pending, running, connected, error, eventCount, answer, cancel }
+  return {
+    summary,
+    builder,
+    tick,
+    pending,
+    running,
+    connected,
+    loaded,
+    error,
+    eventCount,
+    answer,
+    cancel,
+  }
 }

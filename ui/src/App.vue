@@ -12,6 +12,7 @@ import {
   store,
 } from './store'
 import CommandPalette from './components/CommandPalette.vue'
+import ConfirmExecModal from './components/ConfirmExecModal.vue'
 import Icon from './components/Icon.vue'
 import CommandForm from './pages/CommandForm.vue'
 import CommandsPage from './pages/CommandsPage.vue'
@@ -50,6 +51,10 @@ const tools = computed(() => {
 const configName = computed(() => (store.status?.configPath ?? '').split(/[\\/]/).pop() ?? '')
 
 let timer = 0
+
+function reload(): void {
+  window.location.reload()
+}
 
 function onKey(event: KeyboardEvent): void {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
@@ -124,6 +129,13 @@ onBeforeUnmount(() => {
     </aside>
 
     <main class="shell__main">
+      <p v-if="store.offline" class="notice notice--error app__offline">
+        <span
+          >Lost the connection to polyrepo ui. It was probably stopped: start it again with
+          <code>polyrepo ui</code> and reload this page. Your runs and settings are kept.</span
+        >
+        <button class="btn btn--small" @click="reload">Reload</button>
+      </p>
       <p v-if="store.loadError" class="notice notice--error">{{ store.loadError }}</p>
       <PackagesPage v-if="active === 'packages'" />
       <template v-else-if="active === 'commands'">
@@ -138,6 +150,7 @@ onBeforeUnmount(() => {
     </main>
 
     <CommandPalette v-if="store.paletteOpen" @close="store.paletteOpen = false" />
+    <ConfirmExecModal />
   </div>
 </template>
 
@@ -198,6 +211,14 @@ onBeforeUnmount(() => {
     text-decoration: none;
     @include truncate;
   }
+}
+
+.app__offline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $space-3;
+  margin-bottom: $space-3;
 }
 
 .brand {

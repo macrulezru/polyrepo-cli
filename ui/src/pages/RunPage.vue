@@ -71,6 +71,17 @@ watch(
   { immediate: true },
 )
 
+const badge = computed(() => {
+  void tick.value
+  const status = summary.value?.status ?? 'running'
+  const report = buildReport(builder.value)
+  if (status === 'failed' && report.partial) return 'partial' as const
+  if (status === 'done' && report.fail === 0 && report.warn > 0 && report.ok === 0) {
+    return 'attention' as const
+  }
+  return status
+})
+
 const isDryRun = computed(() => summary.value?.options.dryRun === true)
 
 function again(real: boolean): void {
@@ -124,7 +135,7 @@ function onAnswer(value: unknown): void {
         </button>
       </template>
       <template #badges>
-        <StatusBadge v-if="summary" :status="summary.status" />
+        <StatusBadge v-if="summary" :status="badge" />
         <span v-if="summary" class="muted run__meta">
           {{ duration }} · {{ formatWhen(summary.startedAt) }}
         </span>
@@ -159,6 +170,7 @@ function onAnswer(value: unknown): void {
         :tick="tick"
         :running="running"
         :command="summary?.command"
+        :run="summary"
         :previous="previous"
         @show-log="showLog"
       />

@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import type { RunStatus } from '../api'
 
-defineProps<{ status: RunStatus }>()
+defineProps<{ status: RunStatus | 'partial' | 'attention' }>()
 
-const LABELS: Record<RunStatus, string> = {
+const LABELS: Record<RunStatus | 'partial' | 'attention', string> = {
+  partial: 'Partly done',
+  attention: 'Needs attention',
   running: 'Running',
   waiting: 'Waiting for you',
   done: 'Done',
@@ -34,6 +36,11 @@ const LABELS: Record<RunStatus, string> = {
   &--done {
     background: color-mix(in srgb, var(--ok) 16%, transparent);
     color: var(--ok);
+  }
+  &--attention,
+  &--partial {
+    background: var(--warn-soft);
+    color: var(--warn);
   }
   &--failed {
     background: var(--danger-soft);

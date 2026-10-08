@@ -11,6 +11,7 @@ import { releaseCommand } from '../commands/release.js'
 import { syncDepsCommand } from '../commands/syncDeps.js'
 import { execCommand } from '../commands/exec.js'
 import { cloneCommand } from '../commands/clone.js'
+import { commitCommand } from '../commands/commit.js'
 
 const BUMP_TYPES = ['patch', 'minor', 'major', 'prepatch', 'preminor', 'premajor', 'prerelease', 'custom']
 
@@ -58,7 +59,8 @@ export const COMMANDS = [
       flag('quick', 'Quick check', 'Skip the tag, release, npm and dependency checks: version, branch and git status only.'),
       flag('showPath', 'Show paths', 'Add a column with the location of each package on disk.'),
     ],
-    run: (o, c) => listCommand({ configPath: c.configPath, quick: !!o.quick, showPath: !!o.showPath }),
+    run: (o, c) =>
+      listCommand({ configPath: c.configPath, quick: !!o.quick, showPath: !!o.showPath, packages: names(o) }),
   },
   {
     id: 'outdated',
@@ -133,6 +135,36 @@ export const COMMANDS = [
     packages: 'select',
     options: [flag('dryRun', 'Dry run', 'Show what would be updated, write nothing.')],
     run: (o, c) => syncDepsCommand({ configPath: c.configPath, dryRun: !!o.dryRun, packages: names(o), yes: !!o.yes }),
+  },
+  {
+    id: 'commit',
+    title: 'Commit changes',
+    group: 'sync',
+    summary: 'Commit package.json and lock file changes the way each repo allows: straight to the default branch, or through a new branch and a pull request.',
+    mutating: true,
+    packages: 'select',
+    options: [
+      { key: 'message', type: 'text', label: 'Commit message', help: 'Also the title of the pull request.', default: 'chore: update dependencies', required: true },
+      { key: 'scope', type: 'select', label: 'What to commit', help: 'package.json and the lock files, or every tracked change.', default: 'manifest', choices: ['manifest', 'all'] },
+      { key: 'mode', type: 'select', label: 'On the default branch', help: 'auto reads the repo rules and picks the route; direct commits there; branch always opens a new branch.', default: 'auto', choices: ['auto', 'direct', 'branch'] },
+      { key: 'branchName', type: 'text', label: 'Branch name', help: 'For a new branch. Default: chore/<message>-<date>.', default: '' },
+      { key: 'push', type: 'boolean', label: 'Push', help: 'Push the commit (or the new branch) to origin.', default: true },
+      { key: 'pr', type: 'boolean', label: 'Open a pull request', help: 'After pushing a new branch.', default: true },
+      flag('dryRun', 'Dry run', 'Print every step without committing, pushing or opening anything.'),
+    ],
+    run: (o, c) =>
+      commitCommand({
+        configPath: c.configPath,
+        packages: names(o),
+        yes: !!o.yes,
+        message: o.message || undefined,
+        scope: o.scope || 'manifest',
+        mode: o.mode || 'auto',
+        branch: o.branchName || undefined,
+        push: o.push !== false,
+        pr: o.pr !== false,
+        dryRun: !!o.dryRun,
+      }),
   },
   {
     id: 'bump',

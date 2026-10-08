@@ -181,7 +181,7 @@ function offBranch(pkg: PackageInfo): boolean {
 
     <div class="pick__list">
       <p v-if="store.packages.length === 0" class="muted pick__none">
-        No packages found. Check Settings.
+        No packages found. <a href="#/settings">Add a folder in Settings</a>.
       </p>
       <p v-else-if="groups.length === 0" class="muted pick__none">No packages match.</p>
       <div v-else class="pick__head g">

@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { run, gh, ghAsync } from '../exec.js'
 import { remoteBranchExists } from './shared.js'
+import { githubPushPolicy } from './pushPolicy.js'
 
 function findPr(repo, branch, state) {
   const result = gh(repo.path, ['pr', 'list', '--head', branch, '--state', state, '--json', 'number,url'], {
@@ -44,7 +45,7 @@ function createPr(repo, { base, branch, title, body, dryRun }) {
   if (!result.ok) return { ok: false }
   const match = result.stdout.match(/\/pull\/(\d+)/)
   if (!match) return { ok: false, message: `Could not parse PR number from: ${result.stdout}` }
-  return { ok: true, number: match[1] }
+  return { ok: true, number: match[1], url: result.stdout.trim().split('\n').pop() }
 }
 
 function mergePr(repo, number, { dryRun } = {}) {
@@ -185,6 +186,7 @@ export const githubProvider = {
   listOpenPrsAsync,
   getDefaultBranchAsync,
   isBranchProtectedAsync,
+  getPushPolicyAsync: (repo, branch) => githubPushPolicy(branch, (args) => ghAsync(repo.path, args)),
   isPrMergedAsync,
   releaseExistsAsync,
   releaseExists,

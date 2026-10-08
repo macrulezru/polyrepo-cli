@@ -1,4 +1,5 @@
 import { stripAnsi } from './ansi'
+import { parseAudit, type AuditReport } from './auditParse'
 import type { LogBuilder, LogItem, LogSection, SectionHealth } from './logModel'
 
 type TableItem = Extract<LogItem, { kind: 'table' }>
@@ -19,6 +20,9 @@ export interface ReportGroup {
   statuses: LogItem[]
   tables: TableItem[]
   output: LogItem[]
+  commands: string[]
+  audit?: AuditReport
+  partial?: boolean
 }
 
 export type ReportBlock =
@@ -34,6 +38,7 @@ export interface Report {
   fail: number
   steps: number
   problems: Problem[]
+  partial: boolean
 }
 
 function emptyGroup(title: string): ReportGroup {
@@ -47,6 +52,7 @@ function emptyGroup(title: string): ReportGroup {
     statuses: [],
     tables: [],
     output: [],
+    commands: [],
   }
 }
 
@@ -107,6 +113,44 @@ function splitRoot(section: LogSection, blocks: ReportBlock[]): void {
   flush()
 }
 
+function plural(count: number): string {
+  return count === 1 ? 'vulnerability' : 'vulnerabilities'
+}
+
+function interpretAudit(card: ReportGroup): boolean {
+  if (!card.commands.some((line) => /\bnpm\b.*\baudit\b/.test(line))) return false
+  const text = card.output
+    .flatMap((item) =>
+      item.kind === 'raw' || item.kind === 'output' ? [stripAnsi(item.text)] : [],
+    )
+    .join('\n')
+  const audit = parseAudit(text)
+  if (!audit) return false
+  card.audit = audit
+  const index = card.statuses.findIndex(
+    (item) =>
+      item.kind === 'status' &&
+      item.level === 'fail' &&
+      /^Exited with code \d+\./.test(stripAnsi(item.text)),
+  )
+  if (index < 0 || audit.total === 0) return false
+  const fixed = card.commands.some((line) => /\baudit\s+fix\b/.test(line))
+  card.statuses[index] = {
+    kind: 'status',
+    level: 'warn',
+    text: fixed
+      ? `Partially fixed: ${audit.total} ${plural(audit.total)} remain`
+      : `${audit.total} ${plural(audit.total)} found`,
+  }
+  card.fail -= 1
+  card.warn += 1
+  card.partial = true
+  card.notes = card.notes.filter(
+    (item) => !(item.kind === 'line' && /package\(s\) failed/.test(stripAnsi(item.text))),
+  )
+  return true
+}
+
 export function buildReport(builder: LogBuilder): Report {
   const blocks: ReportBlock[] = []
   const problems: Problem[] = []
@@ -115,6 +159,7 @@ export function buildReport(builder: LogBuilder): Report {
   let fail = 0
   let steps = 0
   let cards: ReportGroup[] = []
+  let partial = false
 
   const flushCards = (): void => {
     if (cards.length > 0) blocks.push({ kind: 'steps', cards })
@@ -134,6 +179,14 @@ export function buildReport(builder: LogBuilder): Report {
       for (const item of section.items) {
         if (item.kind === 'heading') card.notes.push({ kind: 'line', text: item.text })
         else place(card, item)
+      }
+      card.commands = card.output.flatMap((item) =>
+        item.kind === 'command' ? [[item.cmd, ...item.args].join(' ')] : [],
+      )
+      if (interpretAudit(card)) {
+        fail -= 1
+        warn += 1
+        partial = true
       }
       cards.push(finish(card))
     }
@@ -159,5 +212,5 @@ export function buildReport(builder: LogBuilder): Report {
     }
   }
 
-  return { blocks, ok, warn, fail, steps, problems }
+  return { partial: partial && fail === 0, blocks, ok, warn, fail, steps, problems }
 }

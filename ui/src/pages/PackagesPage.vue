@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ago, api, type RunSummary, type TableCell } from '../api'
 import { useRun } from '../composables/useRun'
 import { navigate, useRoute } from '../router'
 import { askNotificationPermission, loadPackages, loadRuns, store } from '../store'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
+import LoadingState from '../components/LoadingState.vue'
 import Onboarding from '../components/Onboarding.vue'
 import PageHeader from '../components/PageHeader.vue'
 import ReportTable from '../components/ReportTable.vue'
@@ -17,7 +18,7 @@ const picked = ref<string[]>([])
 const error = ref('')
 const startedId = ref('')
 const quick = ref(false)
-const chip = ref('')
+const chip = ref(route.value.query.get('chip') ?? '')
 
 const latest = computed(() =>
   store.runs.find(
@@ -25,14 +26,41 @@ const latest = computed(() =>
   ),
 )
 const sourceId = computed(() => startedId.value || latest.value?.id || '')
-const { summary, builder, tick, running } = useRun(sourceId)
+const { summary, builder, tick, running, loaded } = useRun(sourceId)
 
-const table = computed(() => {
+const freshTable = computed(() => {
   void tick.value
   for (const section of builder.value.sections) {
     for (const item of section.items) if (item.kind === 'table') return item
   }
   return undefined
+})
+
+watch(freshTable, (found) => {
+  if (found && sourceId.value) store.reportCache = { id: sourceId.value, table: found }
+})
+
+const baseTable = computed(() => {
+  if (freshTable.value) return freshTable.value
+  const cache = store.reportCache
+  return cache && cache.id === sourceId.value ? cache.table : undefined
+})
+
+const table = computed(() => {
+  const base = baseTable.value
+  if (!base) return undefined
+  const since = summary.value ? new Date(summary.value.startedAt).getTime() : 0
+  const rows = base.rows.map((row) => {
+    const key = stripAnsi(row.cells[0]?.text ?? '')
+    const patch = store.patches[key]
+    if (!patch || patch.at < since) return row
+    const cells = base.columns.map((name, index) => {
+      const at = patch.columns.indexOf(name)
+      return (at >= 0 ? patch.cells[at] : undefined) ?? row.cells[index] ?? { text: '', styled: '' }
+    })
+    return { ...row, cells }
+  })
+  return { ...base, rows }
 })
 
 const YELLOW = /\x1b\[33m/
@@ -112,6 +140,7 @@ const initialFilter = computed(() => route.value.query.get('filter') ?? '')
 
 async function refresh(): Promise<void> {
   error.value = ''
+  store.reportStale = false
   try {
     const run = await api.post<RunSummary>('/api/runs', {
       command: 'list',
@@ -174,6 +203,16 @@ onMounted(async () => {
         {{ warning }}
       </p>
 
+      <p v-if="store.refreshing.length" class="muted page__source">
+        <span class="page__spin" aria-hidden="true" />
+        Updating {{ store.refreshing.length }} package{{
+          store.refreshing.length === 1 ? '' : 's'
+        }}…
+      </p>
+      <p v-if="store.reportStale && !store.refreshing.length" class="notice notice--warn">
+        Some packages changed after the last check. Refresh to see their current state.
+      </p>
+
       <p v-if="summary" class="muted page__source">
         <StatusBadge :status="summary.status" />
         Checked {{ ago(summary.startedAt) }}
@@ -203,6 +242,7 @@ onMounted(async () => {
         v-model:picked="picked"
         :columns="table.columns"
         :rows="table.rows"
+        :busy-keys="store.refreshing"
         :row-filter="rowFilter"
         :initial-filter="initialFilter"
         selectable
@@ -220,7 +260,17 @@ onMounted(async () => {
         </template>
       </ReportTable>
 
+      <LoadingState
+        v-else-if="!store.packagesLoaded || (sourceId && !loaded && !running)"
+        text="Loading packages…"
+      />
+
       <template v-else-if="!running">
+        <p v-if="summary?.status === 'failed'" class="notice notice--error page__failed">
+          <span>The last check did not finish{{ summary.error ? `: ${summary.error}` : '' }}.</span>
+          <a :href="`#/runs/${summary.id}`">Open its log</a>
+          <a href="#/commands/doctor">Check your setup</a>
+        </p>
         <EmptyState
           icon="layers"
           title="No report yet"
@@ -232,7 +282,7 @@ onMounted(async () => {
           </button>
         </EmptyState>
       </template>
-      <p v-else class="muted">Checking packages…</p>
+      <LoadingState v-else text="Checking packages…" />
     </template>
   </div>
 </template>
@@ -244,6 +294,21 @@ onMounted(async () => {
   &__source {
     @include cluster($space-2);
     font-size: 13px;
+  }
+
+  &__spin {
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  &__failed {
+    display: flex;
+    flex-wrap: wrap;
+    gap: $space-3;
   }
 
   &__stale {
@@ -279,6 +344,12 @@ onMounted(async () => {
 
   &__ok {
     font-size: 13px;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 </style>

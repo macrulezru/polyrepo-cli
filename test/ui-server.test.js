@@ -134,7 +134,7 @@ test('status, environment and the command catalog', async () => {
   const commands = await (await call('/api/commands')).json()
   assert.deepEqual(
     commands.map((command) => command.id),
-    ['list', 'outdated', 'audit', 'prs', 'doctor', 'switch-default', 'sync-deps', 'bump', 'publish', 'tag', 'release', 'exec', 'clone'],
+    ['list', 'outdated', 'audit', 'prs', 'doctor', 'switch-default', 'sync-deps', 'commit', 'bump', 'publish', 'tag', 'release', 'exec', 'clone'],
   )
   assert.equal(commands.find((command) => command.id === 'bump').mutating, true)
   assert.equal(commands.find((command) => command.id === 'list').mutating, false)
@@ -443,4 +443,100 @@ test('the colour range for monorepo blocks has a default, is validated, and keep
   assert.deepEqual((await (await call('/api/settings')).json()).groupColors, { from: '#112233', to: '#445566' })
   await post('/api/presets', [{ name: 'Keep', packages: ['alpha'] }], 'PUT')
   assert.deepEqual((await (await call('/api/settings')).json()).groupColors, { from: '#112233', to: '#445566' })
+})
+
+test('a command run from the interface does not inherit NO_COLOR', async () => {
+  const runner = path.join(root, 'env-runner.js')
+  fs.writeFileSync(
+    runner,
+    [
+      "process.send({ type: 'ready' })",
+      "process.on('message', (message) => {",
+      "  if (message.type !== 'start') return",
+      "  process.send({ type: 'event', event: { type: 'line', text: 'no-color:' + String(process.env.NO_COLOR) + ' force:' + process.env.FORCE_COLOR } })",
+      "  process.send({ type: 'done', exitCode: 0 })",
+      '  process.exit(0)',
+      '})',
+    ].join('\n'),
+  )
+  const before = process.env.NO_COLOR
+  process.env.NO_COLOR = '1'
+  try {
+    const manager = createRunManager({ directory: path.join(root, 'env-runs'), runner })
+    const run = manager.start({ command: 'list', options: {}, configPath })
+    const seen = []
+    await new Promise((resolve) => {
+      manager.subscribe(run.id, 0, (entry) => {
+        if (entry === null) resolve()
+        else seen.push(entry.event)
+      })
+    })
+    assert.ok(seen.some((event) => event.type === 'line' && event.text === 'no-color:undefined force:1'))
+  } finally {
+    if (before === undefined) delete process.env.NO_COLOR
+    else process.env.NO_COLOR = before
+  }
+})
+
+test('the changes a command made to the manifest and lock file can be seen, discarded or committed through the commit command', async () => {
+  const repo = path.join(root, 'repos', 'alpha')
+  const manifest = path.join(repo, 'package.json')
+  const original = fs.readFileSync(manifest, 'utf8')
+  const pkg = JSON.parse(original)
+  fs.writeFileSync(manifest, JSON.stringify({ ...pkg, dependencies: { left: '^1.0.0' } }, null, 2))
+  fs.writeFileSync(path.join(repo, 'unrelated.txt'), 'x')
+
+  const seen = await (await call('/api/repo/changes?dir=alpha')).json()
+  assert.deepEqual(
+    seen.files.map((entry) => entry.file),
+    ['package.json'],
+  )
+  assert.match(seen.diff, /\+.*left/)
+  assert.equal((await call('/api/repo/changes?dir=nope')).status, 404)
+
+  const refused = await post('/api/repo/revert', { dir: 'alpha', files: ['unrelated.txt'] })
+  assert.equal(refused.status, 409)
+
+  const reverted = await post('/api/repo/revert', { dir: 'alpha', files: ['package.json'] })
+  assert.equal(reverted.status, 200)
+  assert.equal(fs.readFileSync(manifest, 'utf8'), original)
+  assert.equal((await (await call('/api/repo/changes?dir=alpha')).json()).files.length, 0)
+
+  fs.writeFileSync(manifest, JSON.stringify({ ...pkg, dependencies: { right: '^2.0.0' } }, null, 2))
+  const plan = await (await call('/api/repo/commit-plan?dir=alpha&message=chore%3A%20x')).json()
+  assert.deepEqual(plan.files, ['package.json'])
+  assert.equal(plan.dir, 'alpha')
+  assert.match(plan.branchName, /^chore\/x-\d{8}$/)
+  assert.equal((await call('/api/repo/commit-plan?dir=nope')).status, 404)
+
+  const run = await startRun({
+    command: 'commit',
+    confirmed: true,
+    options: { packages: ['alpha'], message: 'chore: npm audit fix', mode: 'direct', push: false },
+  })
+  const entries = await events(run.id)
+  assert.equal(entries.at(-1).event.status, 'done')
+  assert.ok(entries.some((entry) => entry.event.type === 'ok' && /Committed package\.json/.test(entry.event.text)))
+  const log = spawnSync('git', ['log', '-1', '--format=%s'], { cwd: repo, encoding: 'utf8' })
+  assert.equal(log.stdout.trim(), 'chore: npm audit fix')
+  fs.rmSync(path.join(repo, 'unrelated.txt'), { force: true })
+})
+
+test('a hidden refresh of chosen packages returns only their rows and leaves no trace in the history', async () => {
+  const before = (await (await call('/api/runs')).json()).length
+  const started = await post('/api/runs', { command: 'list', hidden: true, options: { quick: true, packages: ['beta'] } })
+  assert.equal(started.status, 202)
+  const run = await started.json()
+  await events(run.id)
+  const log = await (await call(`/api/runs/${run.id}/log`)).json()
+  const table = log.map((entry) => entry.event).find((event) => event.type === 'table')
+  assert.deepEqual(
+    table.rows.map((row) => row.cells[0].text),
+    ['beta'],
+  )
+  assert.equal((await (await call('/api/runs')).json()).length, before)
+  const refused = await post('/api/runs', { command: 'exec', hidden: true, confirmed: true, options: { cmd: 'node -p 1', packages: ['beta'] } })
+  const exec = await refused.json()
+  await events(exec.id)
+  assert.ok((await (await call('/api/runs')).json()).some((item) => item.id === exec.id))
 })

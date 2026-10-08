@@ -17,6 +17,7 @@ import { outdatedCommand } from './commands/outdated.js'
 import { auditCommand } from './commands/audit.js'
 import { prsCommand } from './commands/prs.js'
 import { cloneCommand } from './commands/clone.js'
+import { commitCommand } from './commands/commit.js'
 import { syncDepsCommand } from './commands/syncDeps.js'
 import { uiCommand } from './ui/command.js'
 
@@ -97,7 +98,7 @@ function wrapText(text, width) {
 program
   .name('polyrepo')
   .description(
-    'Manage local npm package repos on GitHub or GitLab (autodetected per repo): pick which directories to scan (setup), clone missing ones from a GitHub org or GitLab group (clone), see their state (list), outdated dependencies (outdated), security vulnerabilities (audit), or open PRs/MRs (prs), run a health check (doctor), keep them on an up-to-date default branch (switch-default), release a version through a PR/MR (bump), publish to npm (publish), tag an already-current version (tag), create releases (release), fix stale cross-package dependency ranges (sync-deps), or run any command across every repo (exec).',
+    'Manage local npm package repos on GitHub or GitLab (autodetected per repo): pick which directories to scan (setup), clone missing ones from a GitHub org or GitLab group (clone), see their state (list), outdated dependencies (outdated), security vulnerabilities (audit), or open PRs/MRs (prs), run a health check (doctor), keep them on an up-to-date default branch (switch-default), release a version through a PR/MR (bump), publish to npm (publish), tag an already-current version (tag), create releases (release), fix stale cross-package dependency ranges (sync-deps), commit dependency changes the way each repo allows (commit), or run any command across every repo (exec).',
   )
   .version(CLI_VERSION)
   .option(
@@ -138,6 +139,7 @@ Examples:
   $ polyrepo tag                                Tag an already-current version (no bump needed)
   $ polyrepo release                            Create releases for tagged packages
   $ polyrepo sync-deps                          Fix local dependency ranges left stale by a bump
+  $ polyrepo commit                             Commit dependency changes the way each repo's rules allow
   $ polyrepo exec -- npm test                   Run any command across every (or selected) package
 
 Run \`polyrepo <command> --help\` for that command's own options and examples.
@@ -750,9 +752,8 @@ written. \`--packages\` here means "only offer issues for these dependent
 packages", same meaning as everywhere else.
 
 Only ever edits package.json on disk — no commit, no push, no branch/PR.
-Review and commit the change yourself afterward (\`git diff\`, or
-\`polyrepo exec -- git commit -am "chore: sync local dependency ranges"\`
-across everything that changed).
+Review the change afterward (\`git diff\`), then commit it the way each repo's
+rules allow with \`polyrepo commit\`.
 
 Examples:
   $ polyrepo sync-deps                          See what's stale, then update it
@@ -766,6 +767,58 @@ Examples:
       configPath: program.opts().config,
       packages: opts.packages ? opts.packages.split(',') : undefined,
       yes: Boolean(opts.yes),
+    }),
+  )
+
+program
+  .command('commit')
+  .description('Commit package.json / lock file changes (for example after npm audit fix) the way each repo allows.')
+  .option('-m, --message <text>', 'Commit message (default: "chore: update dependencies").')
+  .option('--scope <manifest|all>', 'What to commit: package.json and the lock files only, or every tracked change.', 'manifest')
+  .option('--mode <auto|direct|branch>', 'Where the commit goes on the default branch: decided from the repo rules, straight there, or a new branch and a PR/MR.', 'auto')
+  .option('--branch <name>', 'Name for the new branch (default: chore/<message>-<date>).')
+  .option('--no-push', 'Commit only; do not push.')
+  .option('--no-pr', 'Push the new branch but do not open a PR/MR.')
+  .option('--stay', 'Stay on the new branch afterwards instead of going back to the default branch.')
+  .option('--dry-run', 'Print every step without committing, pushing or opening anything.')
+  .option(...PACKAGES_OPTION)
+  .option(...YES_OPTION)
+  .addHelpText(
+    'after',
+    `
+Commits what npm audit fix, npm update or sync-deps left in the working tree,
+without stumbling over branch rules. On a feature branch the commit simply
+goes there. On the default branch, polyrepo reads the host's rules (GitHub
+rulesets and branch protection, GitLab protected branches and your role):
+if direct commits are allowed it commits and pushes; if a pull/merge request
+is required, or the rules cannot be read, it creates a branch, commits there,
+pushes it and opens a PR/MR, and leaves the default branch untouched. If a
+direct push is refused anyway, the commit is moved to a branch for you.
+
+Only package.json and the lock files are offered by default (--scope all adds
+every tracked change). Nothing is merged; review the PR/MR on the host, then
+run polyrepo switch-default to bring the default branch up to date.
+
+Examples:
+  $ polyrepo commit                             Pick packages, write a message, commit the safe way
+  $ polyrepo commit --packages a --yes          Non-interactive: default message, rules decide the route
+  $ polyrepo commit --mode branch --no-pr       Always use a branch, push it, open nothing
+  $ polyrepo commit --dry-run                   Print the plan, change nothing
+`,
+  )
+  .action((opts) =>
+    commitCommand({
+      configPath: program.opts().config,
+      packages: opts.packages ? opts.packages.split(',') : undefined,
+      message: opts.message,
+      scope: opts.scope,
+      mode: opts.mode,
+      branch: opts.branch,
+      push: opts.push,
+      pr: opts.pr,
+      stay: Boolean(opts.stay),
+      yes: Boolean(opts.yes),
+      dryRun: Boolean(opts.dryRun),
     }),
   )
 
