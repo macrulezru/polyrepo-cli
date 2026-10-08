@@ -130,15 +130,19 @@ Run `polyrepo doctor` to check all of this in one go.
 ## Installation
 
 ```bash
+npm install -g polyrepo-cli
+```
+
+This makes the `polyrepo` command available everywhere, with the web interface built in.
+
+To work on the tool itself, run it from a clone instead:
+
+```bash
 git clone <this repository's URL>
 cd polyrepo-cli
 npm install
-```
-
-Optionally, make `polyrepo` available everywhere:
-
-```bash
-npm link
+npm run build:ui    # the web interface; not stored in git
+npm link            # optional: makes `polyrepo` available everywhere
 ```
 
 Without `npm link`, run commands as `node src/index.js <command>`.
@@ -268,7 +272,7 @@ Every run is kept under `~/.polyrepo/runs` (override with the `POLYREPO_HOME` en
 ```bash
 npm test
 npm run dev:ui      # interface with hot reload, against a running `polyrepo ui`
-npm run build:ui    # builds the interface into ui-dist/
+npm run build:ui    # builds the interface into ui-dist/ (npm publish does it by itself)
 ```
 
 ---

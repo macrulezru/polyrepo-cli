@@ -5,4 +5,4 @@ node_modules/
 # `polyrepo setup` (or by copying the example).
 polyrepo.config.json
 
-ui-distr
+ui-dist/
