@@ -1,4 +1,3 @@
-import { confirm } from '@inquirer/prompts'
 import pc from 'picocolors'
 import { discoverRepos, inspectRepos } from '../repos.js'
 import { loadConfig } from '../loadConfig.js'
@@ -6,12 +5,13 @@ import { syncDefaultBranch } from '../defaultBranchSync.js'
 import { selectPackages } from '../selectPackages.js'
 import { heading, stepHeading, ok, fail, warn, columnWidths, formatRow } from '../ui.js'
 import { startSpinner } from '../spinner.js'
+import { confirm, line } from '../runtime.js'
 
 export async function switchDefaultCommand({ configPath, packages, yes = false, force = false, clean = false } = {}) {
   const config = loadConfig({ configPath })
   const discovered = discoverRepos(config)
   if (discovered.length === 0) {
-    console.log(pc.yellow('No repos found.'))
+    line(pc.yellow('No repos found.'))
     return
   }
 
@@ -44,7 +44,7 @@ export async function switchDefaultCommand({ configPath, packages, yes = false, 
   })
 
   if (selected.length === 0) {
-    console.log(pc.dim('Nothing selected.'))
+    line(pc.dim('Nothing selected.'))
     return
   }
 
@@ -61,7 +61,7 @@ export async function switchDefaultCommand({ configPath, packages, yes = false, 
       default: !force,
     })
     if (!proceed) {
-      console.log(pc.dim('Cancelled.'))
+      line(pc.dim('Cancelled.'))
       return
     }
   }

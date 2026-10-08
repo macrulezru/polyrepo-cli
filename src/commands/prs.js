@@ -6,12 +6,13 @@ import { pMap } from '../pMap.js'
 import { heading, printTable } from '../ui.js'
 import { startSpinner } from '../spinner.js'
 import { filterByNames } from '../filterByNames.js'
+import { line } from '../runtime.js'
 
 export async function prsCommand({ configPath, packages } = {}) {
   const config = loadConfig({ configPath })
   const repos = filterByNames(discoverRepos(config), packages)
   if (repos.length === 0) {
-    console.log(pc.yellow('No repos found.'))
+    line(pc.yellow('No repos found.'))
     return
   }
 
@@ -36,7 +37,7 @@ export async function prsCommand({ configPath, packages } = {}) {
   )
 
   if (rows.length === 0) {
-    console.log(pc.green('No open pull/merge requests.'))
+    line(pc.green('No open pull/merge requests.'))
     return
   }
 

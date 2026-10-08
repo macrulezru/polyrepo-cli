@@ -1,10 +1,10 @@
-import { confirm } from '@inquirer/prompts'
 import pc from 'picocolors'
 import { discoverPackages, inspectRepos } from '../repos.js'
 import { loadConfig } from '../loadConfig.js'
 import { run } from '../exec.js'
 import { selectPackages } from '../selectPackages.js'
 import { heading, stepHeading, ok, fail, columnWidths, formatRow } from '../ui.js'
+import { blank, confirm, line, setExitCode } from '../runtime.js'
 
 // Runs one package at a time (not in parallel, unlike the read-only checks
 // elsewhere in this CLI) and always with a real terminal (stdio: 'inherit')
@@ -16,7 +16,7 @@ export async function execCommand({ configPath, packages, yes = false, bail = fa
   const config = loadConfig({ configPath })
   const repos = await inspectRepos(discoverPackages(config))
   if (repos.length === 0) {
-    console.log(pc.yellow('No repos found.'))
+    line(pc.yellow('No repos found.'))
     return
   }
 
@@ -38,7 +38,7 @@ export async function execCommand({ configPath, packages, yes = false, bail = fa
   })
 
   if (selected.length === 0) {
-    console.log(pc.dim('Nothing selected.'))
+    line(pc.dim('Nothing selected.'))
     return
   }
 
@@ -48,7 +48,7 @@ export async function execCommand({ configPath, packages, yes = false, bail = fa
       default: true,
     })
     if (!proceed) {
-      console.log(pc.dim('Cancelled.'))
+      line(pc.dim('Cancelled.'))
       return
     }
   }
@@ -69,8 +69,8 @@ export async function execCommand({ configPath, packages, yes = false, bail = fa
   }
 
   if (failed.length > 0) {
-    console.log('')
-    console.log(pc.red(`${failed.length}/${selected.length} package(s) failed: ${failed.join(', ')}`))
-    process.exitCode = 1
+    blank()
+    line(pc.red(`${failed.length}/${selected.length} package(s) failed: ${failed.join(', ')}`))
+    setExitCode(1)
   }
 }

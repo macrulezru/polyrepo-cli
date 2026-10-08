@@ -1,4 +1,3 @@
-import { confirm } from '@inquirer/prompts'
 import pc from 'picocolors'
 import { discoverPackages, inspectRepos } from '../repos.js'
 import { loadConfig } from '../loadConfig.js'
@@ -9,12 +8,13 @@ import { selectPackages } from '../selectPackages.js'
 import { filterByNames } from '../filterByNames.js'
 import { pMap } from '../pMap.js'
 import { heading, stepHeading, ok, fail, columnWidths, formatRow } from '../ui.js'
+import { confirm, line } from '../runtime.js'
 
 export async function releaseCommand({ configPath, packages, yes = false, dryRun = false } = {}) {
   const config = loadConfig({ configPath })
   const allRepos = (await inspectRepos(discoverPackages(config))).filter((r) => r.version)
   if (allRepos.length === 0) {
-    console.log(pc.yellow('No repos found.'))
+    line(pc.yellow('No repos found.'))
     return
   }
 
@@ -25,11 +25,11 @@ export async function releaseCommand({ configPath, packages, yes = false, dryRun
   // asked about.
   const repos = filterByNames(allRepos, packages)
   if (repos.length === 0) {
-    console.log(pc.dim('Nothing selected.'))
+    line(pc.dim('Nothing selected.'))
     return
   }
 
-  console.log(pc.dim(`Checking ${repos.length} package(s) for a tag and an existing release...`))
+  line(pc.dim(`Checking ${repos.length} package(s) for a tag and an existing release...`))
   // A release always targets `v<local version>` — the tag `polyrepo bump`
   // creates. No tag for the current version means there's nothing to
   // release yet; a tag with no release is exactly what this command is for.
@@ -40,7 +40,7 @@ export async function releaseCommand({ configPath, packages, yes = false, dryRun
     const released = provider ? await provider.releaseExistsAsync(r, tag) : false
     const status = !tagged ? 'no-tag' : released ? 'released' : 'ready'
     const statusText = status === 'no-tag' ? 'not tagged yet' : status === 'released' ? 'already released' : 'ready'
-    console.log(pc.dim(`  ${r.dir}: ${tag} — ${statusText}`))
+    line(pc.dim(`  ${r.dir}: ${tag} — ${statusText}`))
     return { ...r, tag, status }
   })
 
@@ -51,7 +51,7 @@ export async function releaseCommand({ configPath, packages, yes = false, dryRun
   // this, since it skips the checkbox and the per-repo loop below already
   // reports "no tag" per package on its own).
   if (!packages && withStatus.every((r) => r.status === 'no-tag')) {
-    console.log(
+    line(
       pc.yellow('No packages are tagged yet — run `polyrepo bump` (new version) or `polyrepo tag` (current version) first.'),
     )
     return
@@ -80,7 +80,7 @@ export async function releaseCommand({ configPath, packages, yes = false, dryRun
   })
 
   if (selected.length === 0) {
-    console.log(pc.dim('Nothing selected.'))
+    line(pc.dim('Nothing selected.'))
     return
   }
 
@@ -90,7 +90,7 @@ export async function releaseCommand({ configPath, packages, yes = false, dryRun
       default: true,
     })
     if (!proceed) {
-      console.log(pc.dim('Cancelled.'))
+      line(pc.dim('Cancelled.'))
       return
     }
   }

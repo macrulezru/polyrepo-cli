@@ -10,6 +10,7 @@ import { pMap } from '../pMap.js'
 import { printTable, heading, ok, fail } from '../ui.js'
 import { startSpinner } from '../spinner.js'
 import { EXPORT_FORMATS, exportTable, inferExportFormat, writeExport } from '../export.js'
+import { line } from '../runtime.js'
 
 export async function listCommand({ configPath, quick = false, showPath = false, format, output } = {}) {
   if (format && !EXPORT_FORMATS.includes(format)) {
@@ -24,7 +25,7 @@ export async function listCommand({ configPath, quick = false, showPath = false,
   const config = loadConfig({ configPath })
   const repos = discoverPackages(config)
   if (repos.length === 0) {
-    console.log(pc.yellow('No repos found.'))
+    line(pc.yellow('No repos found.'))
     return
   }
 

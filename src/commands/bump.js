@@ -1,5 +1,4 @@
 import fs from 'node:fs'
-import { confirm } from '@inquirer/prompts'
 import pc from 'picocolors'
 import { discoverPackages, inspectRepos, readPackageJson } from '../repos.js'
 import { branchFor } from '../config.js'
@@ -16,6 +15,7 @@ import { heading, stepHeading, ok, fail, warn, columnWidths, formatRow } from '.
 import { selectPackages } from '../selectPackages.js'
 import { startSpinner } from '../spinner.js'
 import { publishOne, ensureNpmLogin, ensureWorkspacesInstalled } from './publish.js'
+import { confirm, line } from '../runtime.js'
 
 function bumpTypeLabel(bumpType, { preid, customVersion } = {}) {
   if (bumpType === 'custom') return `custom → ${customVersion}`
@@ -40,7 +40,7 @@ export async function bumpCommand({
   const config = loadConfig({ configPath })
   const discovered = discoverPackages(config)
   if (discovered.length === 0) {
-    console.log(pc.yellow('No repos found.'))
+    line(pc.yellow('No repos found.'))
     return
   }
 
@@ -53,7 +53,7 @@ export async function bumpCommand({
 
   const repos = allRepos.filter((r) => r.version)
   if (repos.length === 0) {
-    console.log(pc.yellow('No repos found.'))
+    line(pc.yellow('No repos found.'))
     return
   }
 
@@ -91,7 +91,7 @@ export async function bumpCommand({
   })
 
   if (selected.length === 0) {
-    console.log(pc.dim('Nothing selected.'))
+    line(pc.dim('Nothing selected.'))
     return
   }
 
@@ -103,7 +103,7 @@ export async function bumpCommand({
       default: true,
     })
     if (!proceed) {
-      console.log(pc.dim('Cancelled.'))
+      line(pc.dim('Cancelled.'))
       return
     }
   }
@@ -168,7 +168,7 @@ async function bumpOne(repo, { dryRun, waitChecks, config, publish }) {
         state.status === 'open' ? `merge existing ${provider.requestLabel} #${state.pr.number}` : `open + merge a ${provider.requestLabel}`
       const waitNote = waitChecks ? ', waiting for CI checks first' : ''
       const publishNote = publish ? ', then publish to npm' : ''
-      console.log(
+      line(
         pc.magenta(
           `  [dry-run] would ${verb} branch ${branchName}, ensure version ${repo.newVersion} (+ a CHANGELOG.md entry if one exists), commit/push if needed, then ${prVerb}${waitNote}, then tag ${tagFor(repo, repo.newVersion)}${publishNote}.`,
         ),

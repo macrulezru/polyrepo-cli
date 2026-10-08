@@ -6,6 +6,7 @@ import { pMap } from '../pMap.js'
 import { heading, printTable } from '../ui.js'
 import { startSpinner } from '../spinner.js'
 import { filterByNames } from '../filterByNames.js'
+import { line } from '../runtime.js'
 
 const SEVERITY_COLOR = {
   critical: (t) => pc.bold(pc.red(t)),
@@ -36,7 +37,7 @@ export async function auditCommand({ configPath, packages } = {}) {
   const config = loadConfig({ configPath })
   const repos = filterByNames((await inspectRepos(discoverPackages(config))).filter((r) => r.version), packages)
   if (repos.length === 0) {
-    console.log(pc.yellow('No repos found.'))
+    line(pc.yellow('No repos found.'))
     return
   }
 
@@ -60,7 +61,7 @@ export async function auditCommand({ configPath, packages } = {}) {
 
   const failedRepos = results.filter((r) => r.failed).map((r) => r.repo.dir)
   if (failedRepos.length > 0) {
-    console.log(pc.yellow(`Could not check: ${failedRepos.join(', ')}`))
+    line(pc.yellow(`Could not check: ${failedRepos.join(', ')}`))
   }
 
   const rows = results.flatMap(({ repo, entries }) => {
@@ -78,7 +79,7 @@ export async function auditCommand({ configPath, packages } = {}) {
   })
 
   if (rows.length === 0) {
-    console.log(pc.green('No known vulnerabilities.'))
+    line(pc.green('No known vulnerabilities.'))
     return
   }
 
@@ -86,7 +87,7 @@ export async function auditCommand({ configPath, packages } = {}) {
   const criticalOrHighCount = rows.filter((r) => r.severity === 'critical' || r.severity === 'high').length
   const vulnWord = rows.length === 1 ? 'vulnerability' : 'vulnerabilities'
   const summary = `${rows.length} ${vulnWord} across ${packageCount} package(s)`
-  console.log(pc.dim(summary) + (criticalOrHighCount > 0 ? pc.red(`, ${criticalOrHighCount} of them critical/high severity`) : ''))
+  line(pc.dim(summary) + (criticalOrHighCount > 0 ? pc.red(`, ${criticalOrHighCount} of them critical/high severity`) : ''))
 
   printTable(
     rows,

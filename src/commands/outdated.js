@@ -7,6 +7,7 @@ import { pMap } from '../pMap.js'
 import { heading, printTable } from '../ui.js'
 import { startSpinner } from '../spinner.js'
 import { filterByNames } from '../filterByNames.js'
+import { line } from '../runtime.js'
 
 // How far behind "latest" actually is — a major bump is a different kind
 // of attention than a patch, and lumping them under one color hid that.
@@ -30,7 +31,7 @@ export async function outdatedCommand({ configPath, packages } = {}) {
   const config = loadConfig({ configPath })
   const repos = filterByNames((await inspectRepos(discoverPackages(config))).filter((r) => r.version), packages)
   if (repos.length === 0) {
-    console.log(pc.yellow('No repos found.'))
+    line(pc.yellow('No repos found.'))
     return
   }
 
@@ -53,7 +54,7 @@ export async function outdatedCommand({ configPath, packages } = {}) {
 
   const failedRepos = results.filter((r) => r.failed).map((r) => r.repo.dir)
   if (failedRepos.length > 0) {
-    console.log(pc.yellow(`Could not check: ${failedRepos.join(', ')}`))
+    line(pc.yellow(`Could not check: ${failedRepos.join(', ')}`))
   }
 
   const rows = results.flatMap(({ repo, entries }) =>
@@ -68,7 +69,7 @@ export async function outdatedCommand({ configPath, packages } = {}) {
   )
 
   if (rows.length === 0) {
-    console.log(pc.green('Everything up to date.'))
+    line(pc.green('Everything up to date.'))
     return
   }
 
@@ -76,7 +77,7 @@ export async function outdatedCommand({ configPath, packages } = {}) {
   const majorCount = rows.filter((r) => r.severity === 'major').length
   const depWord = rows.length === 1 ? 'dependency' : 'dependencies'
   const summary = `${rows.length} ${depWord} outdated across ${packageCount} package(s)`
-  console.log(pc.dim(summary) + (majorCount > 0 ? pc.red(`, ${majorCount} of them major version behind`) : ''))
+  line(pc.dim(summary) + (majorCount > 0 ? pc.red(`, ${majorCount} of them major version behind`) : ''))
 
   printTable(
     rows,

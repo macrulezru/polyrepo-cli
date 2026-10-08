@@ -1,5 +1,4 @@
 import path from 'node:path'
-import { confirm } from '@inquirer/prompts'
 import pc from 'picocolors'
 import { discoverRepos } from '../repos.js'
 import { loadConfig } from '../loadConfig.js'
@@ -7,6 +6,7 @@ import { git } from '../exec.js'
 import { providerByName } from '../providers/index.js'
 import { selectPackages } from '../selectPackages.js'
 import { heading, stepHeading, ok, fail, columnWidths, formatRow } from '../ui.js'
+import { blank, confirm, line } from '../runtime.js'
 
 // Diffs a GitHub org's (or GitLab group's) repo list against what's already
 // present under one root directory, then clones whatever's missing.
@@ -27,7 +27,7 @@ export async function cloneCommand({
   const config = loadConfig({ configPath })
   const targetRoot = root ? path.resolve(root) : config.roots[0]
   if (!targetRoot) {
-    console.log(pc.red('No root to clone into — pass --root, or run `polyrepo setup` to add one first.'))
+    line(pc.red('No root to clone into — pass --root, or run `polyrepo setup` to add one first.'))
     return
   }
 
@@ -38,7 +38,7 @@ export async function cloneCommand({
   }
 
   heading(`Clone missing repos from ${org} (${provider.name})`)
-  console.log(pc.dim(`Target root: ${targetRoot}`))
+  line(pc.dim(`Target root: ${targetRoot}`))
 
   const listResult = provider.listOrgRepos(org, { includeArchived })
   if (!listResult.ok) {
@@ -51,7 +51,7 @@ export async function cloneCommand({
   const missing = remoteRepos.filter((r) => !existing.has(r.name.toLowerCase()))
 
   if (missing.length === 0) {
-    console.log(pc.green(`Nothing to clone — every repo in ${org} already exists under ${targetRoot}.`))
+    line(pc.green(`Nothing to clone — every repo in ${org} already exists under ${targetRoot}.`))
     return
   }
 
@@ -67,7 +67,7 @@ export async function cloneCommand({
   })
 
   if (selected.length === 0) {
-    console.log(pc.dim('Nothing selected.'))
+    line(pc.dim('Nothing selected.'))
     return
   }
 
@@ -77,7 +77,7 @@ export async function cloneCommand({
       default: true,
     })
     if (!proceed) {
-      console.log(pc.dim('Cancelled.'))
+      line(pc.dim('Cancelled.'))
       return
     }
   }
@@ -93,7 +93,7 @@ export async function cloneCommand({
   }
 
   if (!dryRun && !config.roots.some((r) => path.resolve(r).toLowerCase() === targetRoot.toLowerCase())) {
-    console.log('')
-    console.log(pc.yellow(`Tip: ${targetRoot} isn't in your config yet — run \`polyrepo setup\` to add it as a root.`))
+    blank()
+    line(pc.yellow(`Tip: ${targetRoot} isn't in your config yet — run \`polyrepo setup\` to add it as a root.`))
   }
 }
