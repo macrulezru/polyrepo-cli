@@ -12,6 +12,9 @@ import { readConfigFile, resolveConfigFilePath, writeConfigFile } from '../confi
 import { runWithRuntime } from '../runtime.js'
 import { gitAsync } from '../exec.js'
 import { pMap } from '../pMap.js'
+import { fetchPublishedVersionAsync } from '../registry.js'
+import { distTagFor } from '../commands/publish.js'
+import { commandText, openTerminal, publishInvocation } from './terminal.js'
 import { createEventRuntime } from './events.js'
 import { describeCommands, findCommand, splitCommandLine } from './catalog.js'
 import { HttpError, asObject, matchRoute, readJsonBody, sendJson } from './http.js'
@@ -69,10 +72,15 @@ function validateConfig(body) {
   const object = asObject(body)
   const roots = stringList(object.roots, 'roots')
   const packages = stringList(object.packages, 'packages')
-  const gitlabHosts = stringList(object.gitlabHosts, 'gitlabHosts').map((host) => host.toLowerCase())
+  const gitlabHosts = stringList(object.gitlabHosts, 'gitlabHosts').map((host) =>
+    host.toLowerCase(),
+  )
   for (const host of gitlabHosts) {
     if (!/^[a-z0-9.-]+(:\d+)?$/.test(host)) {
-      throw new HttpError(400, `"${host}" is not a host name — use something like gitlab.company.com`)
+      throw new HttpError(
+        400,
+        `"${host}" is not a host name — use something like gitlab.company.com`,
+      )
     }
   }
   return { roots, packages, gitlabHosts }
@@ -82,7 +90,8 @@ function capture(task) {
   const warnings = []
   const runtime = createEventRuntime({
     emit: (event) => {
-      if (event.type === 'line' && event.text) warnings.push(event.text.replace(/\x1b\[[0-9;]*m/g, ''))
+      if (event.type === 'line' && event.text)
+        warnings.push(event.text.replace(/\x1b\[[0-9;]*m/g, ''))
     },
     ask: async () => undefined,
   })
@@ -120,6 +129,28 @@ function describePackages(config) {
     }
   })
   return { packages, warnings }
+}
+
+const REGISTRY_TTL_MS = 60_000
+const registryCache = new Map()
+
+async function registryVersions(packages, fresh) {
+  const now = Date.now()
+  const versions = {}
+  await pMap(
+    packages.filter((pkg) => !pkg.private),
+    async (pkg) => {
+      const cached = registryCache.get(pkg.path)
+      if (!fresh && cached && now - cached.at < REGISTRY_TTL_MS) {
+        versions[pkg.dir] = cached.version
+        return
+      }
+      const version = await fetchPublishedVersionAsync(pkg)
+      registryCache.set(pkg.path, { at: Date.now(), version })
+      versions[pkg.dir] = version
+    },
+  )
+  return versions
 }
 
 async function withGitState(packages) {
@@ -195,7 +226,9 @@ function cleanPresets(value) {
   if (!Array.isArray(value)) throw new HttpError(400, 'presets must be a list')
   return value.slice(0, 50).map((entry) => {
     const item = asObject(entry, 'preset')
-    const name = String(item.name ?? '').trim().slice(0, 60)
+    const name = String(item.name ?? '')
+      .trim()
+      .slice(0, 60)
     if (name === '') throw new HttpError(400, 'every set needs a name')
     const packages = Array.isArray(item.packages) ? item.packages.map(String).slice(0, 500) : []
     return { name, packages }
@@ -205,7 +238,11 @@ function cleanPresets(value) {
 function gitRun(cwd, args) {
   return new Promise((resolve) => {
     execFile('git', args, { cwd, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
-      resolve({ ok: !error, stdout: String(stdout ?? '').trimEnd(), stderr: String(stderr ?? '').trim() })
+      resolve({
+        ok: !error,
+        stdout: String(stdout ?? '').trimEnd(),
+        stderr: String(stderr ?? '').trim(),
+      })
     })
   })
 }
@@ -232,7 +269,10 @@ function relativeDir(pkg) {
 function insidePackage(pkg, file) {
   const dir = path.posix.dirname(file)
   const rel = relativeDir(pkg)
-  return TRACKED_NAMES.has(path.posix.basename(file)) && (dir === (rel === '' ? '.' : rel) || dir === '.')
+  return (
+    TRACKED_NAMES.has(path.posix.basename(file)) &&
+    (dir === (rel === '' ? '.' : rel) || dir === '.')
+  )
 }
 
 async function changedFiles(pkg) {
@@ -256,7 +296,8 @@ function cleanFiles(body, allowed) {
 async function authState() {
   const probe = async (cmd, args) => {
     const result = await runAsync('.', cmd, args)
-    const text = (result.stdout || result.stderr || '').split('\n').find((l) => l.trim() !== '') ?? ''
+    const text =
+      (result.stdout || result.stderr || '').split('\n').find((l) => l.trim() !== '') ?? ''
     return { ok: result.ok, detail: text.trim() }
   }
   const [gh, glab, npm] = await Promise.all([
@@ -383,6 +424,39 @@ export async function startUiServer({
     },
     {
       method: 'GET',
+      path: '/api/packages/registry',
+      handler: async ({ res, url }) => {
+        const { result } = capture(() => loadConfig({ configPath: state.configPath }))
+        const described = describePackages(result)
+        const versions = await registryVersions(
+          described.packages,
+          url.searchParams.get('fresh') === '1',
+        )
+        sendJson(res, 200, { versions })
+      },
+    },
+    {
+      method: 'POST',
+      path: '/api/terminal/publish',
+      handler: async ({ res, readBody }) => {
+        const body = asObject(await readBody())
+        const pkg = await findPackage(state, String(body.dir ?? ''))
+        if (pkg.private) throw new HttpError(400, `${pkg.dir} is private and is never published`)
+        const override =
+          typeof body.distTag === 'string' && body.distTag !== '' ? body.distTag : undefined
+        let invocation
+        try {
+          invocation = publishInvocation(pkg, distTagFor(pkg.version, override))
+        } catch (error) {
+          throw new HttpError(400, error.message)
+        }
+        const command = commandText(pkg.path, invocation)
+        const result = await openTerminal(pkg.path, invocation)
+        sendJson(res, 200, { ...result, command })
+      },
+    },
+    {
+      method: 'GET',
       path: '/api/repo/changes',
       handler: async ({ res, url }) => {
         const pkg = await findPackage(state, url.searchParams.get('dir') ?? '')
@@ -480,7 +554,9 @@ export async function startUiServer({
         const entry = findCommand(body.command)
         if (!entry) throw new HttpError(404, `no command named "${body.command}"`)
         const options = body.options === undefined ? {} : asObject(body.options, 'options')
-        const writes = entry.mutating || entry.options.some((option) => option.writes && options[option.key] === true)
+        const writes =
+          entry.mutating ||
+          entry.options.some((option) => option.writes && options[option.key] === true)
         if (writes && body.confirmed !== true) {
           throw new HttpError(409, 'this command changes things: confirm it first')
         }
@@ -499,7 +575,10 @@ export async function startUiServer({
         const run = runs.start({
           command: entry.id,
           title: typeof body.title === 'string' && body.title ? body.title : entry.title,
-          options: { ...options, yes: Array.isArray(options.packages) && options.packages.length > 0 },
+          options: {
+            ...options,
+            yes: Array.isArray(options.packages) && options.packages.length > 0,
+          },
           configPath: state.configPath,
           hidden: body.hidden === true && entry.id === 'list',
         })
@@ -628,7 +707,9 @@ export async function startUiServer({
     const dir = state.staticDir
     if (!dir || !fs.existsSync(path.join(dir, 'index.html'))) {
       res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' })
-      res.end('The polyrepo UI is not built in this copy. Run "npm run build:ui" in the polyrepo-cli folder.')
+      res.end(
+        'The polyrepo UI is not built in this copy. Run "npm run build:ui" in the polyrepo-cli folder.',
+      )
       return
     }
     const root = path.resolve(dir)
@@ -649,7 +730,9 @@ export async function startUiServer({
     res.writeHead(200, {
       'Content-Type': type,
       'Content-Length': bytes.length,
-      'Cache-Control': file.includes(`${path.sep}assets${path.sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache',
+      'Cache-Control': file.includes(`${path.sep}assets${path.sep}`)
+        ? 'public, max-age=31536000, immutable'
+        : 'no-cache',
     })
     res.end(bytes)
   }
@@ -661,12 +744,14 @@ export async function startUiServer({
       `127.0.0.1:${state.port}`,
       `[::1]:${state.port}`,
     ])
-    if (!allowedHosts.has((req.headers.host ?? '').toLowerCase())) throw new HttpError(403, 'unexpected Host header')
+    if (!allowedHosts.has((req.headers.host ?? '').toLowerCase()))
+      throw new HttpError(403, 'unexpected Host header')
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`)
     const cookie = cookieName(state.port)
 
     if (req.method === 'GET' && url.pathname === '/' && url.searchParams.has('token')) {
-      if (!sameToken(url.searchParams.get('token') ?? undefined, state.token)) throw new HttpError(403, 'wrong token')
+      if (!sameToken(url.searchParams.get('token') ?? undefined, state.token))
+        throw new HttpError(403, 'wrong token')
       res.writeHead(302, {
         Location: '/',
         'Set-Cookie': `${cookie}=${state.token}; Path=/; HttpOnly; SameSite=Strict`,
@@ -680,7 +765,10 @@ export async function startUiServer({
     if (url.pathname.startsWith('/api/')) {
       if (!authorized) throw new HttpError(401, 'open the address that polyrepo ui printed')
       const origin = req.headers.origin
-      if (origin !== undefined && !allowedHosts.has(origin.replace(/^https?:\/\//, '').toLowerCase())) {
+      if (
+        origin !== undefined &&
+        !allowedHosts.has(origin.replace(/^https?:\/\//, '').toLowerCase())
+      ) {
         throw new HttpError(403, 'unexpected Origin header')
       }
       const found = matchRoute(routes, req.method ?? 'GET', url.pathname)

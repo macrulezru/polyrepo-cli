@@ -96,3 +96,22 @@
     background: var(--surface-2);
   }
 }
+
+@mixin sticky-footer {
+  position: sticky;
+  bottom: -$space-6;
+  z-index: 20;
+  margin-inline: -$space-6;
+  margin-bottom: -$space-6;
+  padding: $space-3 $space-6;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -8px 16px -8px rgb(0 0 0 / 35%);
+
+  @include respond-below(md) {
+    bottom: -$space-4;
+    margin-inline: -$space-4;
+    margin-bottom: -$space-4;
+    padding-inline: $space-4;
+  }
+}

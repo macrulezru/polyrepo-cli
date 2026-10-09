@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import type { PackageInfo } from '../api'
-import { savePresets, store } from '../store'
+import { computed, ref, watch } from 'vue'
+import { api, type PackageInfo } from '../api'
+import { loadPackages, savePresets, store } from '../store'
 import { groupColor } from '../groupColors'
 import Icon from './Icon.vue'
 import StatusChip from './StatusChip.vue'
 
-defineProps<{ hint?: string | undefined }>()
+const props = defineProps<{ hint?: string | undefined; registry?: boolean }>()
 const picked = defineModel<string[]>({ required: true })
 
 interface Group {
@@ -18,6 +18,92 @@ interface Group {
 const search = ref('')
 const onlyDirty = ref(false)
 const hidePrivate = ref(false)
+const onlyAhead = ref(false)
+const npmVersions = ref<Record<string, string | null>>({})
+const npmState = ref<'idle' | 'loading' | 'ready' | 'failed'>('idle')
+let npmFetched = false
+
+async function loadNpm(): Promise<void> {
+  if (!props.registry || store.packages.length === 0) return
+  npmState.value = 'loading'
+  try {
+    const result = await api.get<{ versions: Record<string, string | null> }>(
+      `/api/packages/registry${npmFetched ? '?fresh=1' : ''}`,
+    )
+    npmVersions.value = result.versions
+    npmFetched = true
+    npmState.value = 'ready'
+  } catch {
+    npmState.value = 'failed'
+  }
+}
+
+watch(() => store.packages, loadNpm, { immediate: true })
+
+const refreshing = ref(false)
+
+async function refresh(): Promise<void> {
+  refreshing.value = true
+  try {
+    await loadPackages()
+  } finally {
+    refreshing.value = false
+  }
+}
+
+function compareVersions(a: string, b: string): number {
+  const left = a.split('-')[0]!.split('.').map(Number)
+  const right = b.split('-')[0]!.split('.').map(Number)
+  for (let index = 0; index < Math.max(left.length, right.length); index++) {
+    const diff = (left[index] ?? 0) - (right[index] ?? 0)
+    if (diff !== 0) return diff
+  }
+  return 0
+}
+
+type NpmStatus = 'same' | 'ahead' | 'new' | 'behind' | 'private' | 'unknown'
+
+function npmStatus(pkg: PackageInfo): NpmStatus {
+  if (pkg.private) return 'private'
+  if (npmState.value !== 'ready' || !(pkg.dir in npmVersions.value)) return 'unknown'
+  const published = npmVersions.value[pkg.dir]
+  if (!published) return 'new'
+  if (!pkg.version) return 'unknown'
+  const diff = compareVersions(pkg.version, published)
+  return diff === 0 ? 'same' : diff > 0 ? 'ahead' : 'behind'
+}
+
+const aheadCount = computed(
+  () => store.packages.filter((pkg) => ['ahead', 'new'].includes(npmStatus(pkg))).length,
+)
+
+function rowTones(pkg: PackageInfo): Record<string, boolean> {
+  const status = props.registry ? npmStatus(pkg) : 'unknown'
+  return {
+    'g--dirty': pkg.dirty === true,
+    'g--ahead': status === 'ahead',
+    'g--new': status === 'new',
+  }
+}
+
+function npmLabel(pkg: PackageInfo): string {
+  const status = npmStatus(pkg)
+  if (status === 'private') return ''
+  if (status === 'unknown') return npmState.value === 'failed' ? '?' : '…'
+  return npmVersions.value[pkg.dir] ?? 'not published'
+}
+
+function npmTitle(pkg: PackageInfo): string {
+  const titles: Record<NpmStatus, string> = {
+    same: 'Up to date with npm',
+    ahead: 'The local version is ahead of npm — ready to publish',
+    new: 'Not published to npm yet',
+    behind: 'npm has a newer version than the local one',
+    private: '',
+    unknown: '',
+  }
+  return titles[npmStatus(pkg)]
+}
 const collapsed = ref<string[]>([])
 const saving = ref(false)
 const setName = ref('')
@@ -51,7 +137,8 @@ const shown = computed(() => {
         pkg.dir.toLowerCase().includes(needle) ||
         pkg.name.toLowerCase().includes(needle)) &&
       (!onlyDirty.value || pkg.dirty === true) &&
-      (!hidePrivate.value || !pkg.private),
+      (!hidePrivate.value || !pkg.private) &&
+      (!onlyAhead.value || ['ahead', 'new'].includes(npmStatus(pkg))),
   )
 })
 
@@ -117,10 +204,24 @@ function offBranch(pkg: PackageInfo): boolean {
 </script>
 
 <template>
-  <section class="pick card">
+  <section class="pick card" :class="{ 'pick--npm': registry }">
     <div class="pick__bar">
       <span class="label">Packages</span>
       <span class="muted pick__count">{{ picked.length }} of {{ store.packages.length }}</span>
+      <button
+        class="btn btn--small"
+        :disabled="refreshing || npmState === 'loading'"
+        title="Reread the branches, git state and versions"
+        @click="refresh"
+      >
+        <span
+          class="pick__sync"
+          :class="{ 'pick__sync--on': refreshing || npmState === 'loading' }"
+        >
+          <Icon name="sync" :size="14" />
+        </span>
+        Refresh
+      </button>
       <span class="pick__spacer" />
       <div class="pick__sets">
         <select
@@ -169,6 +270,14 @@ function offBranch(pkg: PackageInfo): boolean {
         <input v-model="hidePrivate" type="checkbox" />
         <span>Hide private</span>
       </label>
+      <label v-if="registry" class="check pick__filter">
+        <input
+          v-model="onlyAhead"
+          type="checkbox"
+          :disabled="npmState !== 'ready' || aheadCount === 0"
+        />
+        <span>Only ahead of npm ({{ npmState === 'ready' ? aheadCount : '…' }})</span>
+      </label>
       <span class="pick__divider" aria-hidden="true" />
       <div class="pick__select-all" role="group" aria-label="Selection">
         <button class="btn btn--small" @click="selectAll">Select all</button>
@@ -189,7 +298,8 @@ function offBranch(pkg: PackageInfo): boolean {
         <span>Package</span>
         <span>Branch</span>
         <span>Git</span>
-        <span>Version</span>
+        <span>{{ registry ? 'Local' : 'Version' }}</span>
+        <span v-if="registry">On npm</span>
       </div>
       <section
         v-for="group in groups"
@@ -227,7 +337,7 @@ function offBranch(pkg: PackageInfo): boolean {
             v-for="pkg in group.items"
             :key="pkg.dir"
             class="g g--row"
-            :class="{ 'g--on': picked.includes(pkg.dir) }"
+            :class="[{ 'g--on': picked.includes(pkg.dir) }, rowTones(pkg)]"
           >
             <span class="g__pick">
               <input
@@ -254,6 +364,13 @@ function offBranch(pkg: PackageInfo): boolean {
               }}</StatusChip>
             </span>
             <span class="g__cell g__ver">{{ pkg.version ?? '?' }}</span>
+            <span
+              v-if="registry"
+              class="g__cell g__ver g__npm"
+              :class="`g__npm--${npmStatus(pkg)}`"
+              :title="npmTitle(pkg)"
+              >{{ npmLabel(pkg) }}</span
+            >
           </label>
         </template>
       </section>
@@ -273,6 +390,14 @@ function offBranch(pkg: PackageInfo): boolean {
 
   &__filters {
     gap: $space-4;
+  }
+
+  &__sync {
+    display: inline-flex;
+
+    &--on {
+      animation: pick-spin 0.9s linear infinite;
+    }
   }
 
   &__filter {
@@ -337,6 +462,10 @@ function offBranch(pkg: PackageInfo): boolean {
 .g {
   display: grid;
   grid-template-columns: 34px minmax(190px, 360px) 112px 84px 84px;
+
+  .pick--npm & {
+    grid-template-columns: 34px minmax(190px, 360px) 112px 84px 84px 120px;
+  }
   justify-content: start;
   align-items: center;
   column-gap: 12px;
@@ -352,6 +481,38 @@ function offBranch(pkg: PackageInfo): boolean {
     &:hover {
       background: var(--surface-2);
     }
+  }
+
+  &--dirty {
+    --row-tone: var(--danger);
+  }
+  &--ahead {
+    --row-tone: var(--warn);
+  }
+  &--new {
+    --row-tone: var(--accent);
+  }
+  &--dirty,
+  &--ahead,
+  &--new {
+    background: color-mix(in srgb, var(--row-tone) 9%, transparent);
+    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--row-tone) 70%, transparent);
+
+    &:hover {
+      background: color-mix(in srgb, var(--row-tone) 15%, transparent);
+    }
+  }
+  &--dirty#{&}--ahead,
+  &--dirty#{&}--new {
+    box-shadow:
+      inset 3px 0 0 color-mix(in srgb, var(--danger) 70%, transparent),
+      inset 6px 0 0 color-mix(in srgb, var(--second-tone) 70%, transparent);
+  }
+  &--dirty#{&}--ahead {
+    --second-tone: var(--warn);
+  }
+  &--dirty#{&}--new {
+    --second-tone: var(--accent);
   }
 
   &--on {
@@ -391,6 +552,18 @@ function offBranch(pkg: PackageInfo): boolean {
     font-family: $font-mono;
     font-size: $font-size-sm;
     color: var(--muted);
+  }
+
+  &__npm--same {
+    color: var(--ok);
+  }
+  &__npm--ahead,
+  &__npm--new {
+    color: var(--warn);
+    font-weight: 600;
+  }
+  &__npm--behind {
+    color: var(--danger);
   }
 }
 
@@ -459,6 +632,12 @@ function offBranch(pkg: PackageInfo): boolean {
     padding: 8px $space-3;
     background: var(--surface-2);
     font-weight: 600;
+  }
+}
+
+@keyframes pick-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 </style>

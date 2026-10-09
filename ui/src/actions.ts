@@ -40,6 +40,44 @@ export function changesDependencies(commands: string[]): boolean {
   return commands.some((line) => CHANGING.some((pattern) => pattern.test(line)))
 }
 
+const MAX_TERMINALS = 5
+
+interface TerminalResult {
+  opened: boolean
+  reason?: string
+  command: string
+}
+
+async function openPublishTerminals(
+  dirs: string[],
+  options: Record<string, unknown>,
+): Promise<string | undefined> {
+  if (dirs.length === 0) return undefined
+  const distTag = typeof options.distTag === 'string' ? options.distTag : ''
+  const results: TerminalResult[] = []
+  for (const dir of dirs.slice(0, MAX_TERMINALS)) {
+    results.push(await api.post<TerminalResult>('/api/terminal/publish', { dir, distTag }))
+  }
+  const failed = results.filter((result) => !result.opened)
+  const skipped = dirs.length - results.length
+  const notes: string[] = []
+  if (failed.length === 0) {
+    notes.push(
+      `Opened ${results.length === 1 ? 'a terminal' : `${results.length} terminals`} with npm publish. Finish the sign-in there, then check the result with “Run again” or in Publish to npm.`,
+    )
+  } else {
+    const text = failed.map((result) => result.command).join(String.fromCharCode(10))
+    await navigator.clipboard.writeText(text).catch(() => undefined)
+    notes.push(
+      `No terminal could be opened (${failed[0]?.reason ?? 'unknown reason'}). The command is copied: run it in a terminal yourself.`,
+    )
+  }
+  if (skipped > 0) {
+    notes.push(`Only the first ${MAX_TERMINALS} packages were opened; ${skipped} more are left.`)
+  }
+  return notes.join(' ')
+}
+
 export interface StepHooks {
   log: () => void
   changes: () => void
@@ -49,7 +87,7 @@ export async function performStep(
   step: NextStep,
   ctx: StepContext,
   hooks: StepHooks,
-): Promise<void> {
+): Promise<string | undefined> {
   const action = step.action
   const dir = ctx.dirs[0] ?? ''
   switch (action.type) {
@@ -74,6 +112,8 @@ export async function performStep(
     case 'copy':
       await navigator.clipboard.writeText(action.text)
       return
+    case 'terminal-publish':
+      return openPublishTerminals(ctx.dirs, ctx.options)
     case 'changes':
       hooks.changes()
       return
