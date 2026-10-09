@@ -613,7 +613,7 @@ function summaryText(group: ReportGroup): string {
 .steps {
   display: grid;
   gap: $space-3;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .step {

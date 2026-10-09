@@ -272,6 +272,7 @@ function clearPreselected(): void {
         </p>
         <PackagePicker
           v-model="picked"
+          :registry="command.id === 'publish'"
           :class="{ 'pick--error': errors.packages }"
           :hint="
             command.packages === 'filter'
@@ -402,6 +403,7 @@ function clearPreselected(): void {
 
   &__actions {
     @include cluster($space-3);
+    @include sticky-footer;
   }
 }
 

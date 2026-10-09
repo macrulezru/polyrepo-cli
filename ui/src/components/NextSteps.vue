@@ -15,6 +15,7 @@ const ICONS: Record<string, string> = {
   link: 'external',
   open: 'external',
   copy: 'copy',
+  'terminal-publish': 'terminal',
   changes: 'check',
   rerun: 'sync',
   log: 'search',
@@ -31,16 +32,19 @@ function critical(step: NextStep): boolean {
 const copied = ref('')
 const showChanges = ref(false)
 const error = ref('')
+const info = ref('')
 
 async function go(step: NextStep): Promise<void> {
   error.value = ''
+  info.value = ''
   try {
-    await performStep(step, props.ctx, {
-      log: () => emit('log'),
-      changes: () => {
-        showChanges.value = !showChanges.value
-      },
-    })
+    info.value =
+      (await performStep(step, props.ctx, {
+        log: () => emit('log'),
+        changes: () => {
+          showChanges.value = !showChanges.value
+        },
+      })) ?? ''
     if (step.action.type === 'copy') {
       copied.value = step.id
       setTimeout(() => {
@@ -68,6 +72,7 @@ async function go(step: NextStep): Promise<void> {
         {{ copied === step.id ? 'Copied' : step.label }}
       </button>
     </div>
+    <p v-if="info" class="notice">{{ info }}</p>
     <p v-if="error" class="notice notice--error">{{ error }}</p>
     <ChangesPanel
       v-if="showChanges && ctx.dirs[0]"

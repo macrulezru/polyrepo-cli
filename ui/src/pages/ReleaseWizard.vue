@@ -122,7 +122,7 @@ onMounted(async () => {
 
     <section v-if="step === 1" class="wiz__body">
       <p class="muted">Which packages are you releasing?</p>
-      <PackagePicker v-model="picked" />
+      <PackagePicker v-model="picked" registry />
     </section>
 
     <section v-else-if="step === 2" class="wiz__body">
@@ -285,6 +285,7 @@ onMounted(async () => {
 
   &__nav {
     @include cluster($space-2);
+    @include sticky-footer;
   }
 
   &__spacer {

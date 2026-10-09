@@ -14,6 +14,7 @@ export type StepAction =
   | { type: 'link'; hash: string }
   | { type: 'open'; url: string }
   | { type: 'copy'; text: string }
+  | { type: 'terminal-publish' }
   | { type: 'changes' }
   | { type: 'rerun' }
   | { type: 'log' }
@@ -173,10 +174,18 @@ const RULES: Rule[] = [
   {
     test: /npm publish failed/i,
     steps: (ctx) => [
+      ...needsDir(ctx, [
+        {
+          id: 'terminal',
+          label: 'Publish in a terminal',
+          hint: 'A sign-in link, a security key or a code: npm only asks for them in a real terminal',
+          primary: true,
+          action: { type: 'terminal-publish' },
+        },
+      ]),
       {
         id: 'login',
         label: 'Check the npm sign-in',
-        primary: true,
         action: { type: 'link', hash: '#/settings' },
       },
       {
